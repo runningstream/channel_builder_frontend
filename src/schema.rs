@@ -1,9 +1,29 @@
 table! {
     channel_list (id) {
         id -> Int4,
-        userid -> Nullable<Int4>,
+        userid -> Int4,
         name -> Varchar,
         data -> Varchar,
+    }
+}
+
+table! {
+    front_end_sess_keys (id) {
+        id -> Int4,
+        userid -> Int4,
+        sesskey -> Varchar,
+        creationtime -> Timestamptz,
+        lastusedtime -> Timestamptz,
+    }
+}
+
+table! {
+    roku_sess_keys (id) {
+        id -> Int4,
+        userid -> Int4,
+        sesskey -> Varchar,
+        creationtime -> Timestamptz,
+        lastusedtime -> Timestamptz,
     }
 }
 
@@ -20,8 +40,12 @@ table! {
 }
 
 joinable!(channel_list -> user_data (userid));
+joinable!(front_end_sess_keys -> user_data (userid));
+joinable!(roku_sess_keys -> user_data (userid));
 
 allow_tables_to_appear_in_same_query!(
     channel_list,
+    front_end_sess_keys,
+    roku_sess_keys,
     user_data,
 );

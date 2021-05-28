@@ -4,6 +4,6 @@ CREATE TABLE user_data (
     pass_hash VARCHAR NOT NULL,
     pass_hash_type INTEGER NOT NULL,
     validation_status BOOLEAN NOT NULL,
-    validation_code VARCHAR,
+    validation_code VARCHAR UNIQUE,
     active_channel INTEGER
 )
