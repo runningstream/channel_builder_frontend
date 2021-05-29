@@ -185,11 +185,12 @@ Object.defineProperty(MainScreen.prototype, 'constructor', {
 
 MainScreen.prototype.draw = function (draw_area) {
     let content = $( "<div></div>" );
-    let button_area = $( "<div></div>" );
+    let mgmt_button_area = $( "<div></div>" );
     let channel_list_area = $( "<div></div>" );
     let channel_edit_area = $( "<div></div>" );
 
-    draw_channel_list(channel_list_area, channel_edit_area);
+    let channel_list_list = new ChannelListList(channel_list_area, channel_edit_area);
+    channel_list_list.draw_channel_list_list();
 
     let validate_button = $( '<input type="button" value="Validate Session">' )
         .click(function() {
@@ -214,6 +215,42 @@ MainScreen.prototype.draw = function (draw_area) {
             });
         });
 
+    mgmt_button_area.append(validate_button);
+    mgmt_button_area.append(logout_button);
+
+    content.append(mgmt_button_area);
+    content.append(channel_list_area);
+    content.append(channel_edit_area);
+
+    draw_area.empty();
+    draw_area.append(content);
+}
+
+function ChannelListList(channel_list_list_area, channel_list_edit_area) {
+    this.channel_list_list_area = channel_list_list_area;
+    this.channel_list_edit_area = channel_list_edit_area;
+    this.channel_list_list = [];
+    this.get_channel_lists_from_server();
+}
+
+ChannelListList.prototype.get_channel_lists_from_server = function () {
+    let channellistlist = this;
+    $.ajax( "/api/v1/get_channel_lists", {
+        "method": "GET",
+    }).done( function(data_str) {
+        channellistlist.channel_list_list = JSON.parse(data_str);
+        channellistlist.draw_channel_list_list();
+    }).fail( function() {
+        // TODO improve
+        alert("Getting channel lists failed, please refresh");
+    });
+}
+
+ChannelListList.prototype.draw_channel_list_list = function () {
+    let channel_list_list = this;
+
+    let channel_list = $( "<ul></ul>" );
+
     let new_channel_list_area = $( "<form>" +
         '<label for="new_channel_list_name">New Channel List Name:</label>' +
         '<input type="textarea" id="new_channel_list_name">' +
@@ -225,6 +262,7 @@ MainScreen.prototype.draw = function (draw_area) {
             let data = {
                 "listname": $("#new_channel_list_name").val(),
             };
+            channel_list_list.channel_list_list.push(data["listname"]);
             $.ajax( "/api/v1/create_channel_list", {
                 "method": "POST",
                 "data": data,
@@ -233,21 +271,144 @@ MainScreen.prototype.draw = function (draw_area) {
             }).fail( function() {
                 alert("Fail");
             });
+            channel_list_list.draw_channel_list_list();
         });
-
 
     new_channel_list_area.append(create_channel_list_button);
 
-    button_area.append(validate_button);
-    button_area.append(logout_button);
-    button_area.append(new_channel_list_area);
+    this.channel_list_list.forEach(function (channel_name) {
+        let channel = $( "<li></li>" ).text(channel_name);
+        let channellist = new ChannelList(channel_name, channel_list_list.channel_list_edit_area);
+        channel.click(function() {
+            channellist.draw_channel_list();
+        });
+        channel_list.append(channel);
+    });
 
-    content.append(channel_list_area);
-    content.append(button_area);
-    content.append(channel_edit_area);
-
+    const draw_area = this.channel_list_list_area;
     draw_area.empty();
-    draw_area.append(content);
+    draw_area.append(channel_list);
+    draw_area.append(new_channel_list_area);
+}
+
+function ChannelList(channel_name, channel_list_edit_area) {
+    this.channel_name = channel_name;
+    this.channel_list_edit_area = channel_list_edit_area;
+    this.channel_list = {"entries": []};
+    this.get_channel_list_from_server();
+}
+
+ChannelList.prototype.get_channel_list_from_server = function () {
+    let channellist = this;
+    $.ajax( "/api/v1/get_channel_list?list_name="+this.channel_name, {
+        "method": "GET",
+    }).done( function(data_str) {
+        channellist.channel_list = JSON.parse(data_str);
+        channellist.draw_channel_list();
+    }).fail( function() {
+        // TODO improve
+        alert("Getting channel list failed, please refresh");
+    });
+}
+
+ChannelList.prototype.put_channel_list_to_server = function() {
+    let channellist = this;
+    let list_dat = {
+        "listname": this.channel_name,
+        "listdata": JSON.stringify(this.channel_list),
+    };
+    $.ajax( "/api/v1/set_channel_list", {
+        "method": "POST",
+        "data": list_dat,
+    }).done( function(data_str) {
+        console.log("Successful update");
+    }).fail( function() {
+        // TODO improve
+        alert("Updating channel list failed, please refresh");
+    });
+}
+
+
+ChannelList.prototype.draw_channel_list = function() {
+    let channellist = this;
+    channellist.channel_list.type="sublist";
+    channellist.channel_list.name=channellist.channel_name;
+    let channel_edit_list = $( "<div></div>" );
+
+    let recursive_render = function(entry, cur_disp_pos) {
+        let ent_disp = $( "<div></div>" );
+        ent_disp.append( $("<div></div>").text(entry.name));
+        if( entry.type == "sublist" ) {
+            let sublist_area = $("<div></div>");
+            let ent_button_area = $("<div></div>");
+            let new_sublist_name = $('<input type="textarea">');
+            let create_sublist_button = $( '<input type="button" value="Create Sublist">' )
+                .click(function() {
+                    // create the sublist and add it to the common data store of the list
+                    channellist.add_sublist(new_sublist_name.val(), entry);
+                    // use the api call to store the new version of the list
+                    channellist.put_channel_list_to_server();
+                    // re-draw the list
+                    channellist.draw_channel_list();
+                });
+            entry.entries.forEach(function (subentry) {
+                recursive_render(subentry, sublist_area);
+            });
+            let new_sublist_label = $('<label>New Sublist Name: </label>');
+            new_sublist_label.append(new_sublist_name);
+
+            let new_video_name = $('<input type="textarea">');
+            let create_video_button = $( '<input type="button" value="Create Video">' )
+                .click(function() {
+                    // create the video and add it to the common data store of the list
+                    channellist.add_video(new_video_name.val(), entry);
+                    // use the api call to store the new version of the list
+                    channellist.put_channel_list_to_server();
+                    // re-draw the list
+                    channellist.draw_channel_list();
+                });
+            let new_video_label = $('<label>New Video Name: </label>');
+            new_video_label.append(new_video_name);
+
+            ent_button_area.append(new_sublist_label);
+            ent_button_area.append(create_sublist_button);
+            ent_button_area.append(new_video_label);
+            ent_button_area.append(create_video_button);
+
+            ent_disp.append(ent_button_area);
+            ent_disp.append(sublist_area);
+        } else if( entry.type = "video" ) {
+            // TODO
+        }
+        cur_disp_pos.append(ent_disp);
+    };
+
+    recursive_render(this.channel_list, channel_edit_list);
+
+    const draw_area = channellist.channel_list_edit_area;
+    draw_area.empty();
+    draw_area.append(channel_edit_list);
+}
+
+ChannelList.prototype.add_sublist = function (sublist_name, entry_position) {
+    let entry = {
+        "name": sublist_name,
+        "image": "",
+        "type": "sublist",
+        "entries": [],
+    };
+    entry_position.entries.push(entry);
+}
+
+ChannelList.prototype.add_video = function (video_name, entry_position) {
+    let entry = {
+        "name": video_name,
+        "image": "",
+        "type": "video",
+        "videourl": [],
+        "videotype": "mp4",
+    };
+    entry_position.entries.push(entry);
 }
 
 function validate_session_or_login_screen(draw_area) {
@@ -259,97 +420,4 @@ function validate_session_or_login_screen(draw_area) {
         let login_screen = new LoginScreen();
         login_screen.draw(draw_area);
     });
-}
-
-function get_channel_lists(on_complete, on_fail) {
-    $.ajax( "/api/v1/get_channel_lists", {
-        "method": "GET",
-    }).done( function(data_str) {
-        on_complete(JSON.parse(data_str));
-    }).fail( function() {
-        on_fail()
-    });
-}
-
-function get_channel_data(channel_name, on_complete, on_fail) {
-    $.ajax( "/api/v1/get_channel_list?list_name="+channel_name, {
-        "method": "GET",
-    }).done( function(data_str) {
-        on_complete(JSON.parse(data_str));
-    }).fail( function() {
-        on_fail()
-    });
-}
-
-function draw_channel_list(draw_area, channel_edit_area) {
-    let channel_list = $( "<ul></ul>" );
-
-    get_channel_lists(
-        // On success
-        function( data ) {
-            console.log(data);
-            data.forEach(function (channel_name) {
-                let channel = $( "<li></li>" ).text(channel_name);
-                channel.click(function() {
-                    draw_channel(channel_name, channel_edit_area);
-                });
-                channel_list.append(channel);
-            });
-        },
-        // On fail
-        function() {
-            // TODO fix this
-            alert("Failed to get the channel lists, please reload");
-        });
-
-    draw_area.empty();
-    draw_area.append(channel_list);
-}
-
-function draw_channel(channel_name, draw_area) {
-    let channel_edit_buttons = $( "<form>" +
-        '<label for="new_sublist_name">New Sublist Name:</label>
-        '<input type="textarea" id="new_sublist_name">'
-        "</form>" );
-    let channel_edit_list = $( "<ul></ul>" );
-
-    get_channel_data(channel_name, 
-        // On complete
-        function( data ) {
-            let entries = data.entries;
-            entries.forEach(function (entry) {
-                /*  Entry format:
-                        name (str), image (str url), type (sublist or video)
-                    With type sublist:
-                        sublist (Entry type, so recursive)
-                    With type video:
-                        vidurl (str url), vidfmt (str formats - mp4, to start)
-                */
-                let channel_entry = $( "<li></li>" ).text(entry.name);
-                channel_entry.click(function(entry) {
-                    // TODO
-                    console.log(entry);
-                });
-                channel_edit_list.append(channel_entry);
-            });
-        },
-        // On fail
-        function() {
-            // TODO fix this
-            alert("Failed to get the channel list, please reload");
-        });
-
-    let create_sublist_button = $( '<input type="button" value="Create Sublist">' )
-        .click(function() {
-            // TODO
-            // create the sublist and add it to the common data store of the list
-            // use the api call to store the new version of the list
-            // re-draw the list
-        });
-
-    channel_edit_buttons.append(create_sublist_button);
-
-    draw_area.empty();
-    draw_area.append(channel_edit_list);
-    draw_area.append(channel_edit_buttons);
 }
