@@ -22,7 +22,7 @@ async fn main() {
 }
 
 mod db_models {
-    use crate::schema::{user_data, front_end_sess_keys};
+    use crate::schema::{user_data, front_end_sess_keys, channel_list};
     use chrono::{DateTime, Utc};
 
     #[derive(Queryable)]
@@ -71,6 +71,14 @@ mod db_models {
         pub name: String,
         pub data: String,
     }
+
+    #[derive(Insertable)]
+    #[table_name="channel_list"]
+    pub struct InsertChannelList<'a> {
+        pub userid: i32,
+        pub name: &'a str,
+        pub data: &'a str,
+    }
 }
 
 mod db {
@@ -78,6 +86,7 @@ mod db {
     use diesel::pg::PgConnection;
     use diesel::Connection;
     use diesel::RunQueryDsl;
+    use diesel::result::Error::NotFound;
     use std::fmt;
     use tokio::sync::Mutex;
     use std::sync::Arc;
@@ -94,6 +103,7 @@ mod db {
         InvalidValidationCode,
         InvalidUsername,
         JSONConversionError,
+        EntryAlreadyExists,
     }
 
     impl fmt::Display for DBError {
@@ -104,6 +114,7 @@ mod db {
                 DBError::InvalidValidationCode => write!(f, "Invalid validation code"),
                 DBError::InvalidUsername => write!(f, "Invalid username"),
                 DBError::JSONConversionError => write!(f, "JSON conversion error"),
+                DBError::EntryAlreadyExists => write!(f, "Entry already exists"),
             }
         }
     }
@@ -394,7 +405,8 @@ mod db {
             -> Result<String, DBError>
         {
             let db_conn = self.db_arc.lock().await;
-            let results = match channel_list::dsl::channel_list.filter(channel_list::userid.eq(user_id))
+            let results = match channel_list::dsl::channel_list
+                .filter(channel_list::userid.eq(user_id))
                 .load::<db_models::QueryChannelList>(& *db_conn)
             {
                 Ok(vals) => vals,
@@ -420,26 +432,158 @@ mod db {
         pub async fn get_channel_list(&self, user_id: i32, list_name: &str)
             -> Result<String, DBError>
         {
-            Ok("asdf".to_string())
+            let db_conn = self.db_arc.lock().await;
+
+            // Get the channel
+            let results = match channel_list::dsl::channel_list
+                .filter(channel_list::userid.eq(user_id))
+                .filter(channel_list::name.eq(list_name))
+                .limit(5)
+                .load::<db_models::QueryChannelList>(& *db_conn)
+            {
+                Ok(vals) => vals,
+                Err(err) => {
+                    println!("Error getting channel list: {}", err);
+                    return Err(DBError::InvalidDBResponse);
+                },
+            };
+
+            // Make sure we got only one
+            if results.len() != 1 {
+                println!(
+                    concat!("Error with channel list db results: ",
+                        "user {}, list {}, result count {}"),
+                    user_id, list_name, results.len()
+                );
+                return Err(DBError::InvalidDBResponse);
+            }
+            
+            Ok(results[0].data.clone())
         }
 
         pub async fn set_channel_list(&self, user_id: i32, list_name: &str,
             list_data: &str)
             -> Result<(), DBError>
         {
-            Ok(())
+            let db_conn = self.db_arc.lock().await;
+
+            match diesel::update(channel_list::dsl::channel_list
+                    .filter(channel_list::userid.eq(user_id))
+                    .filter(channel_list::name.eq(list_name))
+                )
+                .set(channel_list::data.eq(list_data))
+                .execute(& *db_conn)
+            {
+                Ok(1) => Ok(()),
+                Ok(val) => {
+                    println!(concat!(
+                            "Updating channel list returned other-than 1: ",
+                            "userid {} list {} count {}"),
+                        user_id, list_name, val
+                    );
+                    Err(DBError::InvalidDBResponse)},
+                Err(err) => {
+                    println!(concat!("Error updating channel list ",
+                            "userid {} list {} err {:?}"),
+                        user_id, list_name, err
+                    );
+                    Err(DBError::InvalidDBResponse)},
+            }
         }
 
         pub async fn create_channel_list(&self, user_id: i32, list_name: &str)
             -> Result<(), DBError>
         {
-            Ok(())
+            let db_conn = self.db_arc.lock().await;
+
+            // See if the channel already exists
+            match channel_list::dsl::channel_list
+                .filter(channel_list::userid.eq(user_id))
+                .filter(channel_list::name.eq(list_name))
+                .first::<db_models::QueryChannelList>(& *db_conn)
+            {
+                Ok(_) => {
+                    println!("Error creating channel - already exists",);
+                    return Err(DBError::EntryAlreadyExists);
+                },
+                Err(NotFound) => {},
+                Err(err) => {
+                    println!("Error creating channel: {}", err);
+                    return Err(DBError::InvalidDBResponse);
+                },
+            };
+
+            // If it doesn't, create it
+            let new_channel = db_models::InsertChannelList {
+                userid: user_id,
+                name: list_name,
+                data: "{\"entries\": []}",
+            };
+
+            // Insert it
+            match diesel::insert_into(channel_list::table)
+                .values(&new_channel)
+                .execute(& *db_conn)
+            {
+                Ok(1) => Ok(()),
+                Ok(val) => {
+                    println!("Adding channel returned other-than 1: {}", val);
+                    Err(DBError::InvalidDBResponse)},
+                Err(err) => {
+                    println!("Error {:?}", err);
+                    Err(DBError::InvalidDBResponse)},
+            }
         }
 
         pub async fn set_active_channel(&self, user_id: i32, list_name: &str)
             -> Result<(), DBError>
         {
-            Ok(())
+            let db_conn = self.db_arc.lock().await;
+
+            // Get the channel
+            let results = match channel_list::dsl::channel_list
+                .filter(channel_list::userid.eq(user_id))
+                .filter(channel_list::name.eq(list_name))
+                .limit(5)
+                .load::<db_models::QueryChannelList>(& *db_conn)
+            {
+                Ok(vals) => vals,
+                Err(err) => {
+                    println!("Error getting channel: {}", err);
+                    return Err(DBError::InvalidDBResponse);
+                },
+            };
+
+            // Make sure we got only one
+            if results.len() != 1 {
+                println!(
+                    concat!("Error with channel list db results: ",
+                        "user {}, list {}, result count {}"),
+                    user_id, list_name, results.len()
+                );
+                return Err(DBError::InvalidDBResponse);
+            }
+
+            // Update the user to reflect the id
+            match diesel::update(user_data::dsl::user_data.find(user_id))
+                .set(user_data::active_channel.eq(results[0].id))
+                .execute(& *db_conn)
+            {
+                Ok(1) => Ok(()),
+                Ok(val) => {
+                    println!(concat!(
+                            "Updating active channel returned other-than 1: ",
+                            "userid {} list {} count {}"),
+                        user_id, list_name, val
+                    );
+                    Err(DBError::InvalidDBResponse)},
+                Err(err) => {
+                    println!(concat!("Error active channel ",
+                            "userid {} list {} err {:?}"),
+                        user_id, list_name, err
+                    );
+                    Err(DBError::InvalidDBResponse)},
+            }
         }
     }
 }
