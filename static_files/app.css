@@ -3,3 +3,11 @@ div {
     padding: 2px;
     margin: 2px;
 }
+
+.notdisplayed {
+    display: none;
+}
+
+.clist_selected, .clistlist_selected {
+    border: 1px solid red;
+}

@@ -22,7 +22,7 @@ async fn main() {
 }
 
 mod db_models {
-    use crate::schema::{user_data, front_end_sess_keys, channel_list};
+    use crate::schema::{user_data, front_end_sess_keys, channel_list, roku_sess_keys};
     use chrono::{DateTime, Utc};
 
     #[derive(Queryable)]
@@ -65,6 +65,24 @@ mod db_models {
     }
 
     #[derive(Queryable)]
+    pub struct QueryROSessKey {
+        pub id: i32,
+        pub userid: i32,
+        pub sesskey: String,
+        pub creationtime: DateTime<Utc>,
+        pub lastusedtime: DateTime<Utc>,
+    }
+
+    #[derive(Insertable)]
+    #[table_name="roku_sess_keys"]
+    pub struct InsertROSessKey<'a> {
+        pub userid: i32,
+        pub sesskey: &'a str,
+        pub creationtime: DateTime<Utc>,
+        pub lastusedtime: DateTime<Utc>,
+    }
+
+    #[derive(Queryable)]
     pub struct QueryChannelList {
         pub id: i32,
         pub userid: i32,
@@ -83,6 +101,7 @@ mod db_models {
 
 mod db {
     use super::{password_hash_version, db_models, api};
+    use super::api::SessType;
     use diesel::pg::PgConnection;
     use diesel::Connection;
     use diesel::RunQueryDsl;
@@ -90,9 +109,13 @@ mod db {
     use std::fmt;
     use tokio::sync::Mutex;
     use std::sync::Arc;
-    use chrono::Utc;
+    use chrono::{Utc, Duration};
     use crate::diesel::{QueryDsl, ExpressionMethods};
-    use crate::schema::{user_data, channel_list};
+    use crate::schema::{user_data, channel_list, front_end_sess_keys, roku_sess_keys};
+    use crate::schema::user_data::dsl::user_data as ud_dsl;
+    use crate::schema::channel_list::dsl::channel_list as cl_dsl;
+    use crate::schema::front_end_sess_keys::dsl::front_end_sess_keys as fesk_dsl;
+    use crate::schema::roku_sess_keys::dsl::roku_sess_keys as rosk_dsl;
 
     embed_migrations!();
 
@@ -186,13 +209,11 @@ mod db {
         pub async fn validate_account(&self, val_code: &str)
             -> Result<bool, DBError>
         {
-            use crate::schema::user_data::{validation_code, validation_status};
-
             // Lock the database
             let db_conn = self.db_arc.lock().await;
 
             // Find the user_data that matches the val_code if there is one
-            let results = match user_data::dsl::user_data.filter(validation_code.eq(val_code))
+            let results = match ud_dsl.filter(user_data::validation_code.eq(val_code))
                 .limit(5)
                 .load::<db_models::QueryUserData>(& *db_conn)
             {
@@ -218,10 +239,10 @@ mod db {
             let id = results[0].id;
 
             // Update it
-            match diesel::update(user_data::dsl::user_data.find(id))
+            match diesel::update(ud_dsl.find(id))
                 .set((
-                    validation_status.eq(true),
-                    validation_code.eq::<Option<String>>(None),
+                    user_data::validation_status.eq(true),
+                    user_data::validation_code.eq::<Option<String>>(None),
                 ))
                 .execute(& *db_conn)
             {
@@ -238,9 +259,6 @@ mod db {
         pub async fn add_fe_session_key(&self, user: &str, sess_key: &str)
                 -> Result<(), DBError>
         {
-            use crate::schema::user_data::username;
-            use crate::schema::front_end_sess_keys;
-
             // Generate current time
             let time_now = Utc::now();
 
@@ -248,7 +266,7 @@ mod db {
             let db_conn = self.db_arc.lock().await;
 
             // Find the user_data that matches the username if there is one
-            let results = match user_data::dsl::user_data.filter(username.eq(user))
+            let results = match ud_dsl.filter(user_data::username.eq(user))
                 .limit(5)
                 .load::<db_models::QueryUserData>(& *db_conn)
             {
@@ -293,15 +311,75 @@ mod db {
             }
         }
 
-        pub async fn validate_fe_session_key(&self, sess_key: &str)
+        pub async fn add_ro_session_key(&self, user: &str, sess_key: &str)
+                -> Result<(), DBError>
+        {
+            // Generate current time
+            let time_now = Utc::now();
+
+            // Lock the database
+            let db_conn = self.db_arc.lock().await;
+
+            // Find the user_data that matches the username if there is one
+            let results = match ud_dsl.filter(user_data::username.eq(user))
+                .limit(5)
+                .load::<db_models::QueryUserData>(& *db_conn)
+            {
+                Ok(vals) => vals,
+                Err(err) => {
+                    println!("Error getting username: {}", err);
+                    return Err(DBError::InvalidUsername);},
+            };
+
+            // Make sure the returned values make a little sense
+            match results.len() {
+                0 => {
+                    return Err(DBError::InvalidUsername);
+                },
+                1 => {},
+                _ => {
+                    println!("Error with add session key account db results: {}", results.len());
+                    return Err(DBError::InvalidDBResponse);
+                },
+            };
+
+            // Build the sess key entry 
+            let new_sess = db_models::InsertROSessKey {
+                userid: results[0].id,
+                sesskey: sess_key,
+                creationtime: time_now,
+                lastusedtime: time_now,
+            };
+
+            // Make the database insert
+            match diesel::insert_into(roku_sess_keys::table)
+                .values(&new_sess)
+                .execute(& *db_conn)
+            {
+                Ok(1) => Ok(()),
+                Ok(val) => {
+                    println!("Adding sess key other-than 1: {}", val);
+                    Err(DBError::InvalidDBResponse)},
+                Err(err) => {
+                    println!("Error {:?}", err);
+                    Err(DBError::InvalidDBResponse)},
+            }
+        }
+
+        pub async fn validate_session_key(&self, sess_type: SessType, sess_key: &str)
                 -> Result<(bool, i32), DBError>
         {
-            use crate::schema::front_end_sess_keys::dsl::front_end_sess_keys;
-            use crate::schema::front_end_sess_keys::{sesskey, lastusedtime};
-            use chrono::Duration;
+            match sess_type {
+                SessType::Frontend => self.validate_fe_session_key(sess_key).await,
+                SessType::Roku => self.validate_ro_session_key(sess_key).await,
+            }
+        }
 
+        async fn validate_fe_session_key(&self, sess_key: &str)
+                -> Result<(bool, i32), DBError>
+        {
             let db_conn = self.db_arc.lock().await;
-            let results = match front_end_sess_keys.filter(sesskey.eq(sess_key))
+            let results = match fesk_dsl.filter(front_end_sess_keys::sesskey.eq(sess_key))
                 .limit(5)
                 .load::<db_models::QueryFESessKey>(& *db_conn)
             {
@@ -324,9 +402,9 @@ mod db {
 
             let sess_key_age = time_now.signed_duration_since(
                 result.creationtime);
-            if sess_key_age > Duration::seconds(api::SESSION_COOKIE_MAX_AGE.into()) {
+            if sess_key_age > Duration::seconds(api::SESSION_COOKIE_FE_MAX_AGE.into()) {
                 // Delete sess key
-                return match diesel::delete(front_end_sess_keys.find(result.id))
+                return match diesel::delete(fesk_dsl.find(result.id))
                     .execute(& *db_conn)
                 {
                     // Return failed session key
@@ -341,9 +419,69 @@ mod db {
             }
 
             // Update last used time
-            match diesel::update(front_end_sess_keys.find(result.id))
+            match diesel::update(fesk_dsl.find(result.id))
                 .set((
-                    lastusedtime.eq(time_now),
+                    front_end_sess_keys::lastusedtime.eq(time_now),
+                ))
+                .execute(& *db_conn)
+            {
+                Ok(1) => Ok((true, result.userid)),
+                Ok(val) => {
+                    println!("Updating lastusedtime returned other-than 1: {}", val);
+                    Err(DBError::InvalidDBResponse)},
+                Err(err) => {
+                    println!("Error updating lastusedtime {:?}", err);
+                    Err(DBError::InvalidDBResponse)},
+            }
+        }
+
+        async fn validate_ro_session_key(&self, sess_key: &str)
+                -> Result<(bool, i32), DBError>
+        {
+            let db_conn = self.db_arc.lock().await;
+            let results = match rosk_dsl.filter(roku_sess_keys::sesskey.eq(sess_key))
+                .limit(5)
+                .load::<db_models::QueryROSessKey>(& *db_conn)
+            {
+                Ok(vals) => vals,
+                Err(err) => {
+                    println!("Error getting session key: {}", err);
+                    return Err(DBError::InvalidDBResponse);
+                },
+            };
+            
+            if results.len() != 1 {
+                println!("Error with session key db results: {}", results.len());
+                return Err(DBError::InvalidDBResponse);
+            }
+
+            let result = &results[0];
+
+            // Validate that session key hasn't expired
+            let time_now = Utc::now();
+
+            let sess_key_age = time_now.signed_duration_since(
+                result.creationtime);
+            if sess_key_age > Duration::seconds(api::SESSION_COOKIE_RO_MAX_AGE.into()) {
+                // Delete sess key
+                return match diesel::delete(rosk_dsl.find(result.id))
+                    .execute(& *db_conn)
+                {
+                    // Return failed session key
+                    Ok(1) => Ok((false, 0)),
+                    Ok(val) => {
+                        println!("Updating lastusedtime returned other-than 1: {}", val);
+                        Err(DBError::InvalidDBResponse)},
+                    Err(err) => {
+                        println!("Error updating lastusedtime {:?}", err);
+                        Err(DBError::InvalidDBResponse)},
+                };
+            }
+
+            // Update last used time
+            match diesel::update(rosk_dsl.find(result.id))
+                .set((
+                    roku_sess_keys::lastusedtime.eq(time_now),
                 ))
                 .execute(& *db_conn)
             {
@@ -360,12 +498,9 @@ mod db {
         pub async fn logout_fe_session_key(&self, sess_key: &str)
                 -> Result<(), DBError>
         {
-            use crate::schema::front_end_sess_keys::dsl::front_end_sess_keys;
-            use crate::schema::front_end_sess_keys::{sesskey};
-
             let db_conn = self.db_arc.lock().await;
 
-            match diesel::delete(front_end_sess_keys.filter(sesskey.eq(sess_key)))
+            match diesel::delete(fesk_dsl.filter(front_end_sess_keys::sesskey.eq(sess_key)))
                 .execute(& *db_conn)
             {
                 // Return failed session key
@@ -379,10 +514,8 @@ mod db {
         pub async fn get_user_passhash(&self, user: &str)
             -> Result<(String, i32, bool), DBError>
         {
-            use crate::schema::user_data::username;
-
             let db_conn = self.db_arc.lock().await;
-            let results = match user_data::dsl::user_data.filter(username.eq(user))
+            let results = match ud_dsl.filter(user_data::username.eq(user))
                 .limit(5)
                 .load::<db_models::QueryUserData>(& *db_conn)
             {
@@ -405,7 +538,7 @@ mod db {
             -> Result<String, DBError>
         {
             let db_conn = self.db_arc.lock().await;
-            let results = match channel_list::dsl::channel_list
+            let results = match cl_dsl
                 .filter(channel_list::userid.eq(user_id))
                 .load::<db_models::QueryChannelList>(& *db_conn)
             {
@@ -435,7 +568,7 @@ mod db {
             let db_conn = self.db_arc.lock().await;
 
             // Get the channel
-            let results = match channel_list::dsl::channel_list
+            let results = match cl_dsl
                 .filter(channel_list::userid.eq(user_id))
                 .filter(channel_list::name.eq(list_name))
                 .limit(5)
@@ -467,7 +600,7 @@ mod db {
         {
             let db_conn = self.db_arc.lock().await;
 
-            match diesel::update(channel_list::dsl::channel_list
+            match diesel::update(cl_dsl
                     .filter(channel_list::userid.eq(user_id))
                     .filter(channel_list::name.eq(list_name))
                 )
@@ -497,7 +630,7 @@ mod db {
             let db_conn = self.db_arc.lock().await;
 
             // See if the channel already exists
-            match channel_list::dsl::channel_list
+            match cl_dsl
                 .filter(channel_list::userid.eq(user_id))
                 .filter(channel_list::name.eq(list_name))
                 .first::<db_models::QueryChannelList>(& *db_conn)
@@ -541,7 +674,7 @@ mod db {
             let db_conn = self.db_arc.lock().await;
 
             // Get the channel
-            let results = match channel_list::dsl::channel_list
+            let results = match cl_dsl
                 .filter(channel_list::userid.eq(user_id))
                 .filter(channel_list::name.eq(list_name))
                 .limit(5)
@@ -565,7 +698,7 @@ mod db {
             }
 
             // Update the user to reflect the id
-            match diesel::update(user_data::dsl::user_data.find(user_id))
+            match diesel::update(ud_dsl.find(user_id))
                 .set(user_data::active_channel.eq(results[0].id))
                 .execute(& *db_conn)
             {
@@ -594,19 +727,26 @@ mod api {
     use warp::http::StatusCode;
 
     pub static SESSION_COOKIE_NAME: &str = "session";
-    pub const SESSION_COOKIE_MAX_AGE: u32 = 60 * 24 * 5; // 5 days
+    pub const SESSION_COOKIE_FE_MAX_AGE: u32 = 60 * 24 * 5; // 5 days
+    pub const SESSION_COOKIE_RO_MAX_AGE: u32 = 60 * 24 * 365; // 365 days
     const MAX_AUTH_FORM_LEN: u64 = 4096;
+
+    #[derive(Debug, Clone)]
+    pub enum SessType { Frontend, Roku }
 
     pub fn build_filters(db: db::Db)
         -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
     {
         api_authenticate_fe(db.clone())
+            .or(api_authenticate_ro(db.clone()))
             .or(api_create_account(db.clone()))
             .or(api_validate_account(db.clone()))
             .or(api_validate_session_fe(db.clone()))
+            .or(api_validate_session_ro(db.clone()))
             .or(api_logout_session_fe(db.clone()))
             .or(api_get_channel_lists(db.clone()))
             .or(api_get_channel_list(db.clone()))
+            .or(api_get_channel_xml_ro(db.clone()))
             .or(api_set_channel_list(db.clone()))
             .or(api_create_channel_list(db.clone()))
             .or(api_set_active_channel(db.clone()))
@@ -640,6 +780,18 @@ mod api {
             .and_then(api_handlers::authenticate_fe)
     }
 
+    fn api_authenticate_ro(db: db::Db)
+        -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+    {
+        // TODO do I return neutral responses when email doesn't exist vs
+        // bad auth?
+        api_v1_path("authenticate_ro")
+            .and(warp::post())
+            .and(with_db(db))
+            .and(get_form::<models::AuthForm>())
+            .and_then(api_handlers::authenticate_ro)
+    }
+
     fn api_create_account(db: db::Db)
         -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
     {
@@ -667,8 +819,18 @@ mod api {
         api_v1_path("validate_session_fe")
             .and(warp::get())
             .and(with_db(db.clone()))
-            .and(validate_fe_session(db))
+            .and(validate_session(SessType::Frontend, db))
             .and_then(api_handlers::validate_session_fe)
+    }
+
+    fn api_validate_session_ro(db: db::Db)
+        -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+    {
+        api_v1_path("validate_session_ro")
+            .and(warp::get())
+            .and(with_db(db.clone()))
+            .and(validate_session(SessType::Roku, db))
+            .and_then(api_handlers::validate_session_ro)
     }
 
     fn api_logout_session_fe(db: db::Db)
@@ -677,7 +839,7 @@ mod api {
         api_v1_path("logout_session_fe")
             .and(warp::get())
             .and(with_db(db.clone()))
-            .and(validate_fe_session(db))
+            .and(validate_session(SessType::Frontend, db))
             .and_then(api_handlers::logout_session_fe)
     }
 
@@ -687,7 +849,7 @@ mod api {
         api_v1_path("get_channel_lists")
             .and(warp::get())
             .and(with_db(db.clone()))
-            .and(validate_fe_session(db))
+            .and(validate_session(SessType::Frontend, db))
             .and_then(api_handlers::get_channel_lists)
     }
 
@@ -697,9 +859,20 @@ mod api {
         api_v1_path("get_channel_list")
             .and(warp::get())
             .and(with_db(db.clone()))
-            .and(validate_fe_session(db))
+            .and(validate_session(SessType::Frontend, db))
             .and(warp::query::<models::GetChannelListQuery>())
             .and_then(api_handlers::get_channel_list)
+    }
+
+    fn api_get_channel_xml_ro(db: db::Db)
+        -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+    {
+        api_v1_path("get_channel_xml_ro")
+            .and(warp::get())
+            .and(with_db(db.clone()))
+            .and(validate_session(SessType::Roku, db))
+            .and(warp::query::<models::GetChannelListQuery>())
+            .and_then(api_handlers::get_channel_xml_ro)
     }
 
     fn api_set_channel_list(db: db::Db)
@@ -708,7 +881,7 @@ mod api {
         api_v1_path("set_channel_list")
             .and(warp::post())
             .and(with_db(db.clone()))
-            .and(validate_fe_session(db))
+            .and(validate_session(SessType::Frontend, db))
             .and(get_form::<models::SetChannelListForm>())
             .and_then(api_handlers::set_channel_list)
     }
@@ -719,7 +892,7 @@ mod api {
         api_v1_path("create_channel_list")
             .and(warp::post())
             .and(with_db(db.clone()))
-            .and(validate_fe_session(db))
+            .and(validate_session(SessType::Frontend, db))
             .and(get_form::<models::CreateChannelListForm>())
             .and_then(api_handlers::create_channel_list)
     }
@@ -730,7 +903,7 @@ mod api {
         api_v1_path("set_active_channel")
             .and(warp::post())
             .and(with_db(db.clone()))
-            .and(validate_fe_session(db))
+            .and(validate_session(SessType::Frontend, db))
             .and(get_form::<models::SetActiveChannelForm>())
             .and_then(api_handlers::set_active_channel)
     }
@@ -745,19 +918,22 @@ mod api {
             .and(warp::body::form())
     }
 
-    fn validate_fe_session(db: db::Db)
+    fn validate_session(sess_type: SessType, db: db::Db)
         -> impl Filter<Extract = ((String, i32),), Error = warp::Rejection> + Clone
     {
         warp::filters::cookie::cookie::<String>(SESSION_COOKIE_NAME)
             .and(with_db(db.clone()))
-            .and_then(|session_id: String, db: db::Db| async move {
-                match db.validate_fe_session_key(&session_id).await {
-                    Ok((true, user_id)) => Ok((session_id, user_id)),
-                    Ok((false, _)) => Err(reject::custom(Rejections::InvalidSession)),
-                    Err(err) => {
-                        println!("Error validating fe session: {}", err);
-                        Err(reject::custom(Rejections::InvalidSession))
-                    },
+            .and_then(move |session_id: String, db: db::Db| {
+                let sess_type = sess_type.clone();
+                async move {
+                    match db.validate_session_key(sess_type, &session_id).await {
+                        Ok((true, user_id)) => Ok((session_id, user_id)),
+                        Ok((false, _)) => Err(reject::custom(Rejections::InvalidSession)),
+                        Err(err) => {
+                            println!("Error validating fe session: {}", err);
+                            Err(reject::custom(Rejections::InvalidSession))
+                        },
+                    }
                 }
             })
     }
@@ -798,7 +974,7 @@ mod api {
 enum Rejections { InvalidSession, InvalidUser, InvalidPassword,
     HashValidationError, ErrorCreatingUser, ErrorValidatingAccount,
     ErrorAddingSessionKey, ErrorGettingChannelLists, ErrorGettingChannelList,
-    ErrorSettingChannelList, ErrorCreatingChannelList,
+    ErrorParsingChannelList, ErrorSettingChannelList, ErrorCreatingChannelList,
     ErrorSettingActiveChannel }
 
 impl warp::reject::Reject for Rejections {}
@@ -847,11 +1023,24 @@ mod models {
 
 mod api_handlers {
     use super::{models, db, password_hash_version, Rejections, api};
+    use super::api::SessType;
     use rand::Rng;
     use warp::http::StatusCode;
     use warp::reject;
 
+    pub async fn authenticate_ro(db: db::Db, form_dat: models::AuthForm)
+        -> Result<impl warp::Reply, warp::Rejection>
+    {
+        authenticate_gen(SessType::Roku, db, form_dat).await
+    }
+
     pub async fn authenticate_fe(db: db::Db, form_dat: models::AuthForm)
+        -> Result<impl warp::Reply, warp::Rejection>
+    {
+        authenticate_gen(SessType::Frontend, db, form_dat).await
+    }
+
+    async fn authenticate_gen(sess_type: SessType, db: db::Db, form_dat: models::AuthForm)
         -> Result<impl warp::Reply, warp::Rejection>
     {
         let (pass_hash, hash_ver, valid_status) = 
@@ -868,13 +1057,29 @@ mod api_handlers {
 
         let sess_key = gen_large_rand_str();
 
-        match db.add_fe_session_key(&form_dat.username, &sess_key).await {
-            Ok(_) => {},
-            Err(err) => {println!("Error adding session key: {}", err);
-                return Err(reject::custom(Rejections::ErrorAddingSessionKey))},
+        match sess_type {
+            SessType::Frontend => {
+                match db.add_fe_session_key(&form_dat.username, &sess_key).await {
+                    Ok(_) => {},
+                    Err(err) => {println!("Error adding session key: {}", err);
+                        return Err(reject::custom(Rejections::ErrorAddingSessionKey))},
+                };
+            },
+            SessType::Roku => {
+                match db.add_ro_session_key(&form_dat.username, &sess_key).await {
+                    Ok(_) => {},
+                    Err(err) => {println!("Error adding session key: {}", err);
+                        return Err(reject::custom(Rejections::ErrorAddingSessionKey))},
+                };
+            },
+        }
+
+        let max_age = match sess_type {
+            SessType::Frontend => api::SESSION_COOKIE_FE_MAX_AGE,
+            SessType::Roku => api::SESSION_COOKIE_RO_MAX_AGE,
         };
 
-        println!("Authenticated: {:?} key {}", form_dat, sess_key);
+        println!("Authenticated {:?}: {:?} key {}", sess_type, form_dat, sess_key);
 
         match password_hash_version::validate_pw_ver(&form_dat.username,
             &form_dat.password, &pass_hash, hash_ver)
@@ -885,7 +1090,7 @@ mod api_handlers {
                     "Set-Cookie", 
                     format!("{}={}; Max-Age={}", 
                         api::SESSION_COOKIE_NAME, sess_key,
-                        api::SESSION_COOKIE_MAX_AGE)
+                        max_age)
                 )),
             Ok(false) => {println!("Wrong password");
                 Err(reject::custom(Rejections::InvalidPassword))},
@@ -920,7 +1125,20 @@ mod api_handlers {
         
     }
 
-    pub async fn validate_session_fe(_db: db::Db, _sess_info: (String, i32))
+    pub async fn validate_session_fe(db: db::Db, sess_info: (String, i32))
+        -> Result<impl warp::Reply, warp::Rejection>
+    {
+        validate_session(SessType::Frontend, db, sess_info).await
+    }
+
+    pub async fn validate_session_ro(db: db::Db, sess_info: (String, i32))
+        -> Result<impl warp::Reply, warp::Rejection>
+    {
+        validate_session(SessType::Roku, db, sess_info).await
+    }
+
+    async fn validate_session(_sess_type: SessType, _db: db::Db,
+        _sess_info: (String, i32))
         -> Result<impl warp::Reply, warp::Rejection>
     {
         // If we can get to here, we're ok
@@ -964,6 +1182,28 @@ mod api_handlers {
             Err(err) => {println!("Error getting channel list: {}", err); 
                 Err(reject::custom(Rejections::ErrorGettingChannelList))},
         }
+    }
+
+    pub async fn get_channel_xml_ro(db: db::Db, sess_info: (String, i32), 
+        opts: models::GetChannelListQuery)
+        -> Result<impl warp::Reply, warp::Rejection>
+    {
+        let (_sess_key, user_id) = sess_info;
+
+        let channel_list = match db.get_channel_list(user_id, &opts.list_name).await {
+            Ok(val) => val,
+            Err(err) => {println!("Error getting channel list: {}", err); 
+                return Err(reject::custom(Rejections::ErrorGettingChannelList))},
+        };
+
+        let json = match serde_json::from_str(&channel_list) {
+            Ok(val) => val,
+            Err(err) => {println!("Error parsing channel list: {}", err); 
+                return Err(reject::custom(Rejections::ErrorParsingChannelList))},
+        };
+
+        // TODO - turn the json into XML
+        Ok(warp::reply::html(format!("{:?}", json)))
     }
 
     pub async fn set_channel_list(db: db::Db, sess_info: (String, i32), 
