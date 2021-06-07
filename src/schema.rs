@@ -39,7 +39,6 @@ table! {
     }
 }
 
-joinable!(channel_list -> user_data (userid));
 joinable!(front_end_sess_keys -> user_data (userid));
 joinable!(roku_sess_keys -> user_data (userid));
 

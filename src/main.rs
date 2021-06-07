@@ -14,7 +14,7 @@ async fn main() {
     //let email = 
 
     let api = api::build_filters(db.clone());
-    let server_address = "127.0.0.1:3031";
+    let server_address = "0.0.0.0:3031";
     let server_sockaddr: std::net::SocketAddr = server_address
         .parse()
         .expect("Unable to parse socket address");
@@ -127,6 +127,7 @@ mod db {
         InvalidUsername,
         JSONConversionError,
         EntryAlreadyExists,
+        NoEntryReturned,
     }
 
     impl fmt::Display for DBError {
@@ -138,6 +139,7 @@ mod db {
                 DBError::InvalidUsername => write!(f, "Invalid username"),
                 DBError::JSONConversionError => write!(f, "JSON conversion error"),
                 DBError::EntryAlreadyExists => write!(f, "Entry already exists"),
+                DBError::NoEntryReturned => write!(f, "No entry returned"),
             }
         }
     }
@@ -668,6 +670,42 @@ mod db {
             }
         }
 
+        pub async fn get_active_channel(&self, user_id: i32)
+            -> Result<String, DBError>
+        {
+            let db_conn = self.db_arc.lock().await;
+
+            joinable!(user_data -> channel_list (active_channel) );
+
+            let results = match channel_list::table
+                .filter(channel_list::userid.eq(user_id))
+                .inner_join(user_data::table)
+                //.filter(user_data::id.eq(user_id))
+                .select(channel_list::data)
+                .limit(5)
+                .load::<String>(& *db_conn)
+            {
+                Ok(vals) => vals,
+                Err(err) => {
+                    println!("Error getting user pass hash: {}", err);
+                    return Err(DBError::InvalidDBResponse);},
+            };
+
+            // Make sure the returned values make a little sense
+            match results.len() {
+                0 => {
+                    return Err(DBError::NoEntryReturned);
+                },
+                1 => {},
+                _ => {
+                    println!("Error with validate account db results: {}", results.len());
+                    return Err(DBError::InvalidDBResponse);
+                },
+            };
+
+            Ok(results[0].clone())
+        }
+
         pub async fn set_active_channel(&self, user_id: i32, list_name: &str)
             -> Result<(), DBError>
         {
@@ -871,7 +909,6 @@ mod api {
             .and(warp::get())
             .and(with_db(db.clone()))
             .and(validate_session(SessType::Roku, db))
-            .and(warp::query::<models::GetChannelListQuery>())
             .and_then(api_handlers::get_channel_xml_ro)
     }
 
@@ -975,7 +1012,7 @@ enum Rejections { InvalidSession, InvalidUser, InvalidPassword,
     HashValidationError, ErrorCreatingUser, ErrorValidatingAccount,
     ErrorAddingSessionKey, ErrorGettingChannelLists, ErrorGettingChannelList,
     ErrorParsingChannelList, ErrorSettingChannelList, ErrorCreatingChannelList,
-    ErrorSettingActiveChannel }
+    ErrorSettingActiveChannel, ErrorBuildingXML }
 
 impl warp::reject::Reject for Rejections {}
 
@@ -1081,12 +1118,18 @@ mod api_handlers {
 
         println!("Authenticated {:?}: {:?} key {}", sess_type, form_dat, sess_key);
 
+        // Add the session key as content if this is a roku auth
+        let base_reply = match sess_type {
+            SessType::Roku => warp::reply::html(sess_key.clone()),
+            _ => warp::reply::html("".to_string()),
+        };
+
         match password_hash_version::validate_pw_ver(&form_dat.username,
             &form_dat.password, &pass_hash, hash_ver)
         {
             Ok(true) =>
                 Ok(warp::reply::with_header(
-                    StatusCode::OK,
+                    base_reply,
                     "Set-Cookie", 
                     format!("{}={}; Max-Age={}", 
                         api::SESSION_COOKIE_NAME, sess_key,
@@ -1143,7 +1186,7 @@ mod api_handlers {
     {
         // If we can get to here, we're ok
         // TODO - what's the right response?
-        Ok(StatusCode::OK)
+        Ok(warp::reply::html("Valid"))
     }
 
     pub async fn logout_session_fe(db: db::Db, sess_info: (String, i32))
@@ -1175,6 +1218,13 @@ mod api_handlers {
         opts: models::GetChannelListQuery)
         -> Result<impl warp::Reply, warp::Rejection>
     {
+
+        // TODO remove, just for debugging
+        match get_channel_xml_ro(db.clone(), sess_info.clone()).await {
+            Ok(val) => {},
+            Err(err) => {},
+        };
+
         let (_sess_key, user_id) = sess_info;
 
         match db.get_channel_list(user_id, &opts.list_name).await {
@@ -1184,26 +1234,32 @@ mod api_handlers {
         }
     }
 
-    pub async fn get_channel_xml_ro(db: db::Db, sess_info: (String, i32), 
-        opts: models::GetChannelListQuery)
+    pub async fn get_channel_xml_ro(db: db::Db, sess_info: (String, i32)) 
         -> Result<impl warp::Reply, warp::Rejection>
     {
         let (_sess_key, user_id) = sess_info;
 
-        let channel_list = match db.get_channel_list(user_id, &opts.list_name).await {
+        let channel_list = match db.get_active_channel(user_id).await {
             Ok(val) => val,
-            Err(err) => {println!("Error getting channel list: {}", err); 
+            Err(err) => {println!("Error getting active channel: {}", err); 
                 return Err(reject::custom(Rejections::ErrorGettingChannelList))},
         };
 
-        let json = match serde_json::from_str(&channel_list) {
+        let json: serde_json::Value = match serde_json::from_str(&channel_list) {
             Ok(val) => val,
             Err(err) => {println!("Error parsing channel list: {}", err); 
                 return Err(reject::custom(Rejections::ErrorParsingChannelList))},
         };
 
-        // TODO - turn the json into XML
-        Ok(warp::reply::html(format!("{:?}", json)))
+        let xml_str = match serde_xml_rs::to_string(&json) {
+            Ok(val) => val,
+            Err(err) => {println!("Error building XML: {}", err); 
+                return Err(reject::custom(Rejections::ErrorBuildingXML))},
+        };
+
+        println!("{}", xml_str);
+
+        Ok(warp::reply::html(xml_str))
     }
 
     pub async fn set_channel_list(db: db::Db, sess_info: (String, i32), 

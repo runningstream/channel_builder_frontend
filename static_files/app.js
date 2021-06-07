@@ -286,6 +286,10 @@ ChannelListList.prototype.draw_channel_list_list = function () {
     let set_active_channel_list_button = 
         $( '<input type="button" value="Set Active List">' )
         .click(function() {
+            let curr_sel = channel_list_list.currently_selected;
+            if( curr_sel == null ) {
+                return;
+            }
             let data = {
                 "listname": channel_list_list.currently_selected.channel_name,
             };

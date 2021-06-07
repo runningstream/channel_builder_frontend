@@ -24,7 +24,7 @@ The front end authentication should allow users to read/write, but should also t
 * authenticate_ro - pass a username and password and roku data, get a session key or failure
 ** post request, with username / pass in the body
 * validate_session_ro - pass a session key, get success / fail
-* get_channel_xml_ro - pass a session key, get channel data
+* get_channel_xml_ro - pass a session key, get channel data from the active channel
 
 The roku authentication should only allow users to read, and should timeout after a long time (1 year of unuse?).
 

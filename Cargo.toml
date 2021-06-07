@@ -12,6 +12,7 @@ warp = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_urlencoded = "0.7"
 serde_json = "1.0"
+serde-xml-rs = { git = "https://github.com/joemat/serde-xml-rs.git", rev = "3267cd2" }
 diesel = { version = "1.4.4", features = ["postgres", "chrono"] }
 diesel_migrations = "1.4.0"
 argon2 = "0.1"
