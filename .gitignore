@@ -1,4 +1,5 @@
 /target
 *.swp
+*.css.map
 Cargo.lock
 dev_diesel_env

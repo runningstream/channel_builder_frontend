@@ -1,13 +1,99 @@
-div {
-    border: 1px solid black;
-    padding: 2px;
-    margin: 2px;
+body {
+  background: #e7e8d1;
+  color: #8f1014;
 }
 
 .notdisplayed {
-    display: none;
+  display: none;
 }
 
-.clist_selected, .clistlist_selected {
-    border: 1px solid red;
+.sel_list_ent.selected {
+  border: 1px solid #b85042;
 }
+
+#content {
+  display: flex;
+  flex-direction: row-reverse;
+  border-width: 1px;
+  border-radius: 5px;
+  padding: 8px;
+}
+
+#chan_list {
+  width: 20%;
+}
+
+#chan_edit {
+  width: 80%;
+  margin-right: 5px;
+}
+
+#chan_list, #chan_edit {
+  margin-bottom: 5px;
+}
+
+.sel_list_ent:nth-child(odd) {
+  background: #a7beae;
+}
+
+.sel_list_ent:nth-child(even) {
+  background: #e7e8d1;
+}
+
+.sel_list_ent {
+  border: 1px #e7e8d1 solid;
+  border-radius: 5px;
+  padding: 5px;
+}
+
+#header_area {
+  position: fixed;
+  height: 2em;
+  width: 100%;
+  left: 0px;
+  top: 0px;
+  background-color: #e7e8d1;
+}
+
+#screen_area {
+  margin-bottom: -2em;
+  margin-top: 2em;
+}
+
+#screen_area:after {
+  height: 2em;
+  content: "";
+  display: block;
+}
+
+#footer_area {
+  position: fixed;
+  height: 2em;
+  width: 100%;
+  left: 0px;
+  bottom: 0px;
+  background-color: #e7e8d1;
+}
+
+input[type=button] {
+  background-color: #b85042;
+  border: 1px #e7e8d1 solid;
+  border-radius: 5px;
+}
+
+@media (max-width: 700px) {
+  #content {
+    display: block;
+  }
+
+  #chan_edit {
+    width: 100%;
+    margin-right: 0px;
+  }
+
+  #chan_list {
+    width: 100%;
+  }
+}
+
+/*# sourceMappingURL=app.css.map */

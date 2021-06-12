@@ -1,14 +1,16 @@
 $(document).ready(main);
 
 function main() {
+    const HEAD_AREA = $("#header_area");
     const SCREEN_AREA = $("#screen_area");
+    const FOOT_AREA = $("#footer_area");
 
     // See if this is a registration request
     const urlParams = new URLSearchParams(window.location.search);
     const val_code = urlParams.get("val_code");
     if( val_code !== null ) {
         let val_screen = new ValidationScreen();
-        val_screen.draw(SCREEN_AREA);
+        val_screen.draw(HEAD_AREA, SCREEN_AREA, FOOT_AREA);
         return;
     }
 
@@ -18,11 +20,11 @@ function main() {
     }).done( function() {
         // Display the main screen
         let main_screen = new MainScreen();
-        main_screen.draw(SCREEN_AREA);
+        main_screen.draw(HEAD_AREA, SCREEN_AREA, FOOT_AREA);
     }).fail( function() {
         // Display the login screen
         let login_screen = new LoginScreen();
-        login_screen.draw(SCREEN_AREA);
+        login_screen.draw(HEAD_AREA, SCREEN_AREA, FOOT_AREA);
     });
 }
 
@@ -30,8 +32,10 @@ function UIScreen() {
     
 }
 
-UIScreen.prototype.draw = function (draw_area) {
+UIScreen.prototype.draw = function (head_area, draw_area, foot_area) {
     let content = $("You drew the parent UIScreen - you should never see this.");
+    head_area.empty();
+    foot_area.empty();
     draw_area.empty();
     draw_area.append(content);
 }
@@ -47,7 +51,7 @@ Object.defineProperty(LoginScreen.prototype, 'constructor', {
     writable: true 
 });
 
-LoginScreen.prototype.draw = function (draw_area) {
+LoginScreen.prototype.draw = function (head_area, draw_area, foot_area) {
     let content = $( '<form>' +
         '<label for="login_username">Username:</label>' +
         '<input type="text" id="login_username" autocomplete="username">' +
@@ -66,7 +70,7 @@ LoginScreen.prototype.draw = function (draw_area) {
             }).done(function() {
                 // TODO determine if we now have a session id, and if so, jump to the next part, otherwise display failure
                 let main_screen = new MainScreen();
-                main_screen.draw(draw_area);
+                main_screen.draw(head_area, draw_area, foot_area);
             }).fail(function() {
                 // TODO determine reason for failure and take action
             });
@@ -74,12 +78,14 @@ LoginScreen.prototype.draw = function (draw_area) {
     let register_button = $( '<input type="button" value="Register">' )
         .click(function() {
             let reg_screen = new RegisterScreen();
-            reg_screen.draw(draw_area);
+            reg_screen.draw(head_area, draw_area, foot_area);
         });
 
     content.append(login_button);
     content.append(register_button);
 
+    head_area.empty();
+    foot_area.empty();
     draw_area.empty();
     draw_area.append(content);
 }
@@ -95,7 +101,7 @@ Object.defineProperty(RegisterScreen.prototype, 'constructor', {
     writable: true 
 });
 
-RegisterScreen.prototype.draw = function (draw_area) {
+RegisterScreen.prototype.draw = function (head_area, draw_area, foot_area) {
     let content = $( '<form>' +
         '<label for="reg_username">Email Address:</label>' +
         '<input type="text" id="reg_username" autocomplete="username">' +
@@ -123,13 +129,15 @@ RegisterScreen.prototype.draw = function (draw_area) {
                 // TODO determine whether it was successful and display a message
                 alert("User account requested, look for an email...");
                 let login_screen = new LoginScreen();
-                login_screen.draw(draw_area);
+                login_screen.draw(head_area, draw_area, foot_area);
             }).fail(function() {
                 // TODO determine reason for failure and take action
             });
         });
     content.append(login_button);
 
+    head_area.empty();
+    foot_area.empty();
     draw_area.empty();
     draw_area.append(content);
 }
@@ -145,7 +153,7 @@ Object.defineProperty(ValidationScreen.prototype, 'constructor', {
     writable: true 
 });
 
-ValidationScreen.prototype.draw = function (draw_area) {
+ValidationScreen.prototype.draw = function (head_area, draw_area, foot_area) {
     let content = $( '<form>' +
         '</form>'
     );
@@ -160,7 +168,7 @@ ValidationScreen.prototype.draw = function (draw_area) {
                 // TODO determine whether it was successful and display a message
                 alert("User validation successful!  Now login."); 
                 let login_screen = new LoginScreen();
-                login_screen.draw(draw_area);
+                login_screen.draw(head_area, draw_area, foot_area);
             }).fail( function() {
                 // TODO determine reason for failure and take action
             });
@@ -168,6 +176,8 @@ ValidationScreen.prototype.draw = function (draw_area) {
 
     content.append(validate_button);
 
+    head_area.empty();
+    foot_area.empty();
     draw_area.empty();
     draw_area.append(content);
 }
@@ -183,13 +193,13 @@ Object.defineProperty(MainScreen.prototype, 'constructor', {
     writable: true 
 });
 
-MainScreen.prototype.draw = function (draw_area) {
-    let content = $( "<div></div>" );
+MainScreen.prototype.draw = function (head_area, draw_area, foot_area) {
+    let content = $( '<div id="content"></div>' );
     let mgmt_button_area = $( "<div></div>" );
-    let channel_list_area = $( "<div></div>" );
-    let channel_edit_area = $( "<div></div>" );
+    let channel_list_area = $( '<div id="chan_list"></div>' );
+    let channel_edit_area = $( '<div id="chan_edit"></div>' );
 
-    let channel_list_list = new ChannelListList(channel_edit_area);
+    let channel_list_list = new ChannelListList(channel_edit_area, foot_area);
     channel_list_list.draw(channel_list_area);
 
     let validate_button = $( '<input type="button" value="Validate Session">' )
@@ -209,26 +219,29 @@ MainScreen.prototype.draw = function (draw_area) {
                 "method": "GET",
             }).done( function() {
                 let login_screen = new LoginScreen();
-                login_screen.draw(draw_area);
+                login_screen.draw(head_area, draw_area, foot_area);
             }).fail( function() {
-                validate_session_or_login_screen(draw_area);
+                validate_session_or_login_screen(head_area, draw_area, foot_area);
             });
         });
 
     mgmt_button_area.append(validate_button);
     mgmt_button_area.append(logout_button);
 
-    content.append(mgmt_button_area);
     content.append(channel_list_area);
     content.append(channel_edit_area);
 
+    head_area.empty();
+    foot_area.empty();
     draw_area.empty();
+    head_area.append(mgmt_button_area);
     draw_area.append(content);
 }
 
-function ChannelListList(channel_list_edit_area) {
+function ChannelListList(channel_list_edit_area, chan_list_edit_button_dest) {
     this.channel_list_list_area = $( "<div></div>" );
     this.channel_list_edit_area = channel_list_edit_area;
+    this.channel_list_edit_button_dest = chan_list_edit_button_dest;
     this.channel_list_list = [];
     this.selected_list = null;
 
@@ -249,19 +262,21 @@ ChannelListList.prototype.get_channel_lists_from_server = function () {
 }
 
 ChannelListList.prototype.draw = function (draw_area) {
-    draw_area.empty();
+    console.log("qwer");
+    draw_area.children().detach();
     draw_area.append(this.channel_list_list_area);
 }
 
 ChannelListList.prototype.draw_channel_list_list = function () {
     let channel_list_list = this;
 
-    let channel_list = $( "<div></div>" );
+    let channel_list = $( '<div></div>' );
 
     let new_channel_list_area = $( "<form>" +
         '<label for="new_channel_list_name">New Channel List Name:</label>' +
         '<input type="textarea" id="new_channel_list_name">' +
         "</form>" );
+
 
     let create_channel_list_button = 
         $( '<input type="button" value="Create Channel List">' )
@@ -305,9 +320,11 @@ ChannelListList.prototype.draw_channel_list_list = function () {
         });
     new_channel_list_area.append(set_active_channel_list_button);
 
+    let chan_edit_butt_dest = this.channel_list_edit_button_dest;
+
     this.channel_list_list.forEach(function (channel_name) {
-        let channel = $( "<div></div>" ).text(channel_name);
-        let channellist = new ChannelList(channel_name);
+        let channel = $( '<div class="sel_list_ent"></div>' ).text(channel_name);
+        let channellist = new ChannelList(channel_name, chan_edit_butt_dest);
         channel.click(function() {
             channellist.draw(channel_list_list.channel_list_edit_area);
             channel_list_list.set_selection(channellist, channel.get()[0]);
@@ -315,20 +332,22 @@ ChannelListList.prototype.draw_channel_list_list = function () {
         channel_list.append(channel);
     });
 
-    this.channel_list_list_area.empty();
+    this.channel_list_list_area.children().detach();
     this.channel_list_list_area.append(channel_list);
     this.channel_list_list_area.append(new_channel_list_area);
 }
 
 ChannelListList.prototype.set_selection = function(channel_list, domelem) {
     this.currently_selected = channel_list;
-    $(".clistlist_selected").removeClass("clistlist_selected");
-    domelem.classList.add("clistlist_selected");
+    $(".selected").removeClass("selected");
+    domelem.classList.add("selected");
 }
 
-function ChannelList(channel_name) {
+function ChannelList(channel_name, chan_edit_butt_dest) {
     this.channel_name = channel_name;
+    this.channel_list_button_dest = chan_edit_butt_dest;
     this.channel_list_edit_area = $("<div></div>");
+    this.channel_list_button_area = $("<div></div>");
     this.channel_list = {"entries": []};
     this.currently_selected = null;
     this.add_entry_button = null;
@@ -338,8 +357,10 @@ function ChannelList(channel_name) {
 }
 
 ChannelList.prototype.draw = function (draw_area) {
-    draw_area.empty();
+    draw_area.children().detach();
     draw_area.append(this.channel_list_edit_area);
+    this.channel_list_button_dest.children().detach();
+    this.channel_list_button_dest.append(this.channel_list_button_area);
 }
 
 ChannelList.prototype.get_channel_list_from_server = function () {
@@ -378,7 +399,7 @@ ChannelList.prototype.draw_channel_list = function() {
     channellist.channel_list.type="sublist";
     channellist.channel_list.name=channellist.channel_name;
     let channel_edit_buttons = $( "<div></div>" );
-    let channel_edit_list = $( "<div></div>" );
+    let channel_edit_list = $( '<div></div>' );
 
     let new_name = $('<input type="textarea">');
     let new_name_label = $('<label>Name: </label>');
@@ -448,9 +469,8 @@ ChannelList.prototype.draw_channel_list = function() {
     channel_edit_buttons.append(this.change_entry_button);
 
     let recursive_render = function(entry, cur_disp_pos) {
-        let ent_disp = $( "<div></div>" );
+        let ent_disp = $( '<div class="sel_list_ent"></div>' );
         ent_disp.click(function(ev) {
-            channellist.currentlyselected = entry;
             channellist.set_selection(entry, ent_disp.get()[0]); 
 
             // Prevent the click from bubbling up to higher level divs
@@ -464,19 +484,23 @@ ChannelList.prototype.draw_channel_list = function() {
         });
         if( entry.type == "sublist" ) {
             ent_disp.append( $("<div></div>").text(entry.name));
-            let sublist_area = $("<details></details>");
+            let sublist_area = $('<details></details>');
             let sublist_summ = $("<summary>Sublist:</summary>");
+            let sublist_div = $('<div></div>');
             sublist_area.append(sublist_summ);
+            sublist_area.append(sublist_div);
             entry.entries.forEach(function (subentry) {
-                recursive_render(subentry, sublist_area);
+                recursive_render(subentry, sublist_div);
             });
             // TODO - display more
             ent_disp.append(sublist_area);
         } else if( entry.type = "video" ) {
             ent_disp.append( $("<div></div>").text(entry.name));
             let video_area = $("<details></details>");
+            let video_div = $('<div></div>');
             let video_summ = $("<summary>Video Details:</summary>");
             video_area.append(video_summ);
+            video_area.append(video_div);
             // TODO - display more
             ent_disp.append(video_area);
         }
@@ -487,16 +511,17 @@ ChannelList.prototype.draw_channel_list = function() {
     let top_level_elem = recursive_render(this.channel_list, channel_edit_list);
     this.set_selection(this.channel_list, top_level_elem); 
 
-    channellist.channel_list_edit_area.empty();
+    channellist.channel_list_edit_area.children().detach();
     channellist.channel_list_edit_area.append(channel_edit_list);
-    channellist.channel_list_edit_area.append(channel_edit_buttons);
+    channellist.channel_list_button_area.children().detach();
+    channellist.channel_list_button_area.append(channel_edit_buttons);
 }
 
 ChannelList.prototype.set_selection = function (entry, domelem) {
     console.log(entry, domelem);
     this.currently_selected = entry;
-    $(".clist_selected").removeClass("clist_selected");
-    domelem.classList.add("clist_selected");
+    $(".selected").removeClass("selected");
+    domelem.classList.add("selected");
 
     if( entry.type == "sublist" ) {
         this.add_entry_button.removeClass("notdisplayed");
@@ -554,13 +579,13 @@ ChannelList.prototype.add_video = function (video_name, imgurl, vidurl, videncty
     return true;
 }
 
-function validate_session_or_login_screen(draw_area) {
+function validate_session_or_login_screen(head_area, draw_area, foot_area) {
     $.ajax( "/api/v1/validate_session_fe", {
         "method": "GET",
     }).done( function() {
         // Do nothing - we're still valid
     }).fail( function() {
         let login_screen = new LoginScreen();
-        login_screen.draw(draw_area);
+        login_screen.draw(head_area, draw_area, foot_area);
     });
 }

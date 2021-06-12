@@ -1,0 +1,5 @@
+Install sass with "npm install sass" in some directory like ~/node (it'll install it under that directory)
+
+Then, from that directory run something like:
+
+watch -n 1 npx sass ~/Documents/Code/channel_builder/static_files/app.scss ~/Documents/Code/channel_builder/static_files/app.css
