@@ -167,10 +167,19 @@ ValidationScreen.prototype.draw = function (head_area, draw_area, foot_area) {
             }).done( function() {
                 // TODO determine whether it was successful and display a message
                 alert("User validation successful!  Now login."); 
+                window.history.pushState("Account Validation", "Account Validation", "/");
                 let login_screen = new LoginScreen();
                 login_screen.draw(head_area, draw_area, foot_area);
-            }).fail( function() {
-                // TODO determine reason for failure and take action
+            }).fail( function(jqXHR, textStatus, errorThrown) {
+                // TODO test the part below, perhaps display in a nicer way
+                if( jqXHR.status == 403 ) {
+                    alert("Invalid validation code.");
+                } else {
+                    alert("Validation failed.");
+                }
+                window.history.pushState("Main Screen", "Main Screen", "/");
+                let login_screen = new LoginScreen();
+                login_screen.draw(head_area, draw_area, foot_area);
             });
         });
 

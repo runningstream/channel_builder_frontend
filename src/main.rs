@@ -6,15 +6,39 @@ pub mod schema;
 #[tokio::main]
 async fn main() {
 
-    // Setup DB with arc mutex?
-    let db_url = "postgres://postgres:mysecretpassword@localhost/roku_channel_builder";
-    let db = db::Db::new(db_url);
+    // Get some parameters from the environment
+    let db_password = match std::env::var("POSTGRES_PASSWORD_FILE") {
+        Ok(filename) => match std::fs::read_to_string(filename) {
+            Ok(val) => val.trim().to_string(),
+            Err(err) => panic!("Error reading postgres password file: {:?}", err),
+        },
+        Err(_) => match std::env::var("POSTGRES_PASSWORD") {
+            Ok(password) => password,
+            Err(err) => panic!(concat!("No postgress password supplied ",
+                    "as envionment variable: {:?}"),
+                err),
+        },
+    };
+
+    let db_host = match std::env::var("POSTGRES_HOST") {
+        Ok(host) => host,
+        Err(_) => "localhost:3031".to_string(),
+    };
+
+    let server_address = match std::env::var("CB_LISTEN") {
+        Ok(addr) => addr,
+        Err(_) => "127.0.0.1:3031".to_string(),
+    };
+
+    // Setup DB with arc mutex
+    let db_url = format!("postgres://{}:{}@{}/roku_channel_builder",
+        "postgres", db_password, db_host);
+    let db = db::Db::new(&db_url);
 
     // Setup email handler?
     //let email = 
 
     let api = api::build_filters(db.clone());
-    let server_address = "0.0.0.0:3031";
     let server_sockaddr: std::net::SocketAddr = server_address
         .parse()
         .expect("Unable to parse socket address");
@@ -100,7 +124,7 @@ mod db_models {
 }
 
 mod db {
-    use super::{password_hash_version, db_models, api};
+    use super::{password_hash_version, db_models, api, helpers};
     use super::api::SessType;
     use diesel::pg::PgConnection;
     use diesel::Connection;
@@ -109,7 +133,7 @@ mod db {
     use std::fmt;
     use tokio::sync::Mutex;
     use std::sync::Arc;
-    use chrono::{Utc, Duration};
+    use chrono::Utc;
     use crate::diesel::{QueryDsl, ExpressionMethods};
     use crate::schema::{user_data, channel_list, front_end_sess_keys, roku_sess_keys};
     use crate::schema::user_data::dsl::user_data as ud_dsl;
@@ -151,8 +175,13 @@ mod db {
 
     impl Db {
         pub fn new(db_url: &str) -> Self {
-            let db_conn = PgConnection::establish(db_url)
-                .expect("Unable to connect to database");
+            let db_conn = match helpers::retry_on_err(5, std::time::Duration::new(5, 0), || {
+                PgConnection::establish(db_url)
+                },)
+            {
+                Ok(ret) => ret,
+                Err(err) => panic!("Unable to connect to database: {:?}", err),
+            };
 
             match embedded_migrations::run_with_output(&db_conn,
                 &mut std::io::stdout()) 
@@ -404,7 +433,7 @@ mod db {
 
             let sess_key_age = time_now.signed_duration_since(
                 result.creationtime);
-            if sess_key_age > Duration::seconds(api::SESSION_COOKIE_FE_MAX_AGE.into()) {
+            if sess_key_age > chrono::Duration::seconds(api::SESSION_COOKIE_FE_MAX_AGE.into()) {
                 // Delete sess key
                 return match diesel::delete(fesk_dsl.find(result.id))
                     .execute(& *db_conn)
@@ -464,7 +493,7 @@ mod db {
 
             let sess_key_age = time_now.signed_duration_since(
                 result.creationtime);
-            if sess_key_age > Duration::seconds(api::SESSION_COOKIE_RO_MAX_AGE.into()) {
+            if sess_key_age > chrono::Duration::seconds(api::SESSION_COOKIE_RO_MAX_AGE.into()) {
                 // Delete sess key
                 return match diesel::delete(rosk_dsl.find(result.id))
                     .execute(& *db_conn)
@@ -1000,10 +1029,13 @@ mod api {
             code = StatusCode::FORBIDDEN;
             message = "Forbidden".to_string();
             Ok(warp::reply::with_status(message, code))
+        } else if let Some(Rejections::InvalidValidationCode) = err.find() {
+            code = StatusCode::FORBIDDEN;
+            message = "Forbidden".to_string();
+            Ok(warp::reply::with_status(message, code))
         } else {
             Err(err)
         }
-
     }
 }
 
@@ -1012,7 +1044,7 @@ enum Rejections { InvalidSession, InvalidUser, InvalidPassword,
     HashValidationError, ErrorCreatingUser, ErrorValidatingAccount,
     ErrorAddingSessionKey, ErrorGettingChannelLists, ErrorGettingChannelList,
     ErrorParsingChannelList, ErrorSettingChannelList, ErrorCreatingChannelList,
-    ErrorSettingActiveChannel, ErrorBuildingXML }
+    ErrorSettingActiveChannel, InvalidValidationCode }
 
 impl warp::reject::Reject for Rejections {}
 
@@ -1059,7 +1091,7 @@ mod models {
 }
 
 mod api_handlers {
-    use super::{models, db, password_hash_version, Rejections, api};
+    use super::{models, db, password_hash_version, Rejections, api, helpers};
     use super::api::SessType;
     use rand::Rng;
     use warp::http::StatusCode;
@@ -1068,6 +1100,7 @@ mod api_handlers {
     pub async fn authenticate_ro(db: db::Db, form_dat: models::AuthForm)
         -> Result<impl warp::Reply, warp::Rejection>
     {
+        println!("Trying to auth roku");
         authenticate_gen(SessType::Roku, db, form_dat).await
     }
 
@@ -1147,7 +1180,7 @@ mod api_handlers {
     {
         // TODO: handle properly when the rand number is already in the DB
         let reg_key = gen_large_rand_str();
-        println!("Adding user with reg key {}", reg_key);
+        println!("Adding user with reg key ?val_code={}", reg_key);
 
         match db.add_user(&form_dat.username, &form_dat.password, &reg_key).await {
             Ok(_) => Ok(StatusCode::OK),
@@ -1162,8 +1195,13 @@ mod api_handlers {
     {
         match db.validate_account(&opts.val_code).await {
             Ok(_) => Ok(StatusCode::OK),
+            Err(db::DBError::InvalidValidationCode) => {
+                println!("Invalid validation code received."); 
+                Err(reject::custom(Rejections::InvalidValidationCode))
+            },
             Err(err) => {println!("Error validating account: {}", err); 
-                Err(reject::custom(Rejections::ErrorValidatingAccount))},
+                Err(reject::custom(Rejections::ErrorValidatingAccount))
+            },
         }
         
     }
@@ -1218,13 +1256,6 @@ mod api_handlers {
         opts: models::GetChannelListQuery)
         -> Result<impl warp::Reply, warp::Rejection>
     {
-
-        // TODO remove, just for debugging
-        match get_channel_xml_ro(db.clone(), sess_info.clone()).await {
-            Ok(val) => {},
-            Err(err) => {},
-        };
-
         let (_sess_key, user_id) = sess_info;
 
         match db.get_channel_list(user_id, &opts.list_name).await {
@@ -1251,15 +1282,8 @@ mod api_handlers {
                 return Err(reject::custom(Rejections::ErrorParsingChannelList))},
         };
 
-        let xml_str = match serde_xml_rs::to_string(&json) {
-            Ok(val) => val,
-            Err(err) => {println!("Error building XML: {}", err); 
-                return Err(reject::custom(Rejections::ErrorBuildingXML))},
-        };
-
-        println!("{}", xml_str);
-
-        Ok(warp::reply::html(xml_str))
+        let xml_str1 = helpers::build_xml(json.clone());
+        Ok(warp::reply::html(xml_str1))
     }
 
     pub async fn set_channel_list(db: db::Db, sess_info: (String, i32), 
@@ -1402,5 +1426,53 @@ mod password_hash_version {
 
         // Verify password
         Ok(argon2.verify_password(password.as_bytes(), &parsed_hash).is_ok())
+    }
+}
+
+mod helpers {
+    use std::result::Result;
+    use std::fmt::Debug;
+    use std::time::Duration;
+    use std::thread::sleep;
+
+    #[derive(Debug)]
+    pub enum RetryErr {
+        RetriesExhausted,
+    }
+
+    pub fn retry_on_err<F: Fn() -> Result<T, U>, T, U: Debug>
+        ( count: u32, sleep_len: Duration, func: F) -> Result<T, RetryErr>
+    {
+        if count <= 0 {
+            println!("Retries exhausted");
+            return Err(RetryErr::RetriesExhausted);
+        }
+        match func() {
+            Ok(val) => Ok(val),
+            Err(err) => {
+                println!("Error with {} retries remaining: {:?}", count - 1, err);
+                sleep(sleep_len);
+                retry_on_err(count - 1, sleep_len, func)
+            },
+        }
+    }
+
+
+    pub fn build_xml(json: serde_json::Value) -> String {
+        use serde_json::Value;
+        match json {
+            Value::Null => "".to_string(),
+            Value::Bool(val) => format!("{}", val),
+            Value::Number(val) => format!("{}", val),
+            Value::String(val) => format!("{}", val),
+            Value::Array(arr) => arr.iter()
+                .map(|val| {
+                    format!("<array_elem>{}</array_elem>", build_xml(val.clone())) 
+                }).collect::<String>(),
+            Value::Object(map) => format!("<object>{}</object>", 
+                map.iter().map(|(key, val)| {
+                    format!("<{}>{}</{}>", key, build_xml(val.clone()), key)
+                }).collect::<String>()),
+        }
     }
 }

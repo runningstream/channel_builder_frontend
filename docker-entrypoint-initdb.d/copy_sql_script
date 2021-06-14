@@ -1,0 +1,1 @@
+for i in ../migrations/*/up.sql; do DIR=`basename \`dirname "$i"\``; BN=`basename $i`; cp $i "${DIR}_up.sql"; done

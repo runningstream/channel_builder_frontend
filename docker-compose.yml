@@ -1,0 +1,30 @@
+version: "3.9"
+secrets:
+    db_password:
+        file: ./db_password.secret
+volumes:
+    db_data:
+services:
+    db:
+        image: postgres
+        environment:
+            POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+        volumes:
+            - "db_data:/var/lib/postgresql/data"
+            - type: bind
+              source: "./docker-entrypoint-initdb.d"
+              target: "/docker-entrypoint-initdb.d"
+        ports:
+            - 5432:5432
+        secrets:
+            - db_password
+    channel_builder:
+        build: .
+        environment:
+            POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+            POSTGRES_HOST: "db:5432"
+            CB_LISTEN: "0.0.0.0:3031"
+        ports:
+            - 3031:3031
+        secrets:
+            - db_password
