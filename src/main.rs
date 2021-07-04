@@ -62,6 +62,16 @@ mod db_models {
     use crate::schema::{user_data, front_end_sess_keys, channel_list, roku_sess_keys};
     use chrono::{DateTime, Utc};
 
+    pub struct SessKeyComponents {
+        pub id: i32,
+        pub userid: i32,
+        pub creationtime: DateTime<Utc>,
+    }
+
+    pub trait SessKeyCommon {
+        fn get_common(&self) -> SessKeyComponents;
+    }
+
     #[derive(Queryable)]
     pub struct QueryUserData {
         pub id: i32,
@@ -92,6 +102,16 @@ mod db_models {
         pub lastusedtime: DateTime<Utc>,
     }
 
+    impl SessKeyCommon for QueryFESessKey {
+        fn get_common(&self) -> SessKeyComponents {
+            SessKeyComponents {
+                id: self.id,
+                userid: self.userid,
+                creationtime: self.creationtime,
+            }
+        }
+    }
+
     #[derive(Insertable)]
     #[table_name="front_end_sess_keys"]
     pub struct InsertFESessKey<'a> {
@@ -108,6 +128,16 @@ mod db_models {
         pub sesskey: String,
         pub creationtime: DateTime<Utc>,
         pub lastusedtime: DateTime<Utc>,
+    }
+
+    impl SessKeyCommon for QueryROSessKey {
+        fn get_common(&self) -> SessKeyComponents {
+            SessKeyComponents {
+                id: self.id,
+                userid: self.userid,
+                creationtime: self.creationtime,
+            }
+        }
     }
 
     #[derive(Insertable)]
@@ -328,6 +358,7 @@ mod email {
 mod db {
     use super::{password_hash_version, db_models, api, helpers};
     use super::api::SessType;
+    use super::db_models::SessKeyCommon;
     use diesel::pg::PgConnection;
     use diesel::Connection;
     use diesel::RunQueryDsl;
@@ -377,10 +408,9 @@ mod db {
     pub enum Action {
         AddUser { user: String, pass: String, reg_key: String },
         ValidateAccount { val_code: String },
-        AddFESessKey { user: String, sess_key: String },
-        AddROSessKey { user: String, sess_key: String },
+        AddSessKey { user: String, sess_type: SessType, sess_key: String },
         ValidateSessKey { sess_type: SessType, sess_key: String },
-        LogoutFESessKey { sess_key: String },
+        LogoutSessKey { sess_type: SessType, sess_key: String },
         GetUserPassHash { user: String },
         GetChannelLists { user_id: i32 },
         GetChannelList { user_id: i32, list_name: String },
@@ -472,14 +502,12 @@ mod db {
                         Self::add_user(&dat, user, pass, reg_key),
                     Action::ValidateAccount { val_code } =>
                         Self::validate_account(&dat, val_code),
-                    Action::AddFESessKey { user, sess_key } =>
-                        Self::add_fe_session_key(&dat, user, sess_key),
-                    Action::AddROSessKey { user, sess_key } =>
-                        Self::add_ro_session_key(&dat, user, sess_key),
+                    Action::AddSessKey { user, sess_type, sess_key } =>
+                        Self::add_session_key(&dat, user, sess_type, sess_key),
                     Action::ValidateSessKey { sess_type, sess_key } =>
                         Self::validate_session_key(&dat, sess_type, sess_key),
-                    Action::LogoutFESessKey { sess_key } =>
-                        Self::logout_fe_session_key(&dat, sess_key),
+                    Action::LogoutSessKey { sess_type, sess_key } =>
+                        Self::logout_session_key(&dat, sess_type, sess_key),
                     Action::GetUserPassHash { user } =>
                         Self::get_user_passhash(&dat, user),
                     Action::GetChannelLists { user_id } =>
@@ -586,8 +614,9 @@ mod db {
             }
         }
 
-        fn add_fe_session_key(dat: &InThreadData, user: String, sess_key: String)
-                -> Result<Response, DBError>
+        fn add_session_key(dat: &InThreadData, user: String,
+                sess_type: SessType, sess_key: String)
+            -> Result<Response, DBError>
         {
             // Generate current time
             let time_now = Utc::now();
@@ -618,71 +647,32 @@ mod db {
             };
 
             // Build the sess key entry 
-            let new_sess = db_models::InsertFESessKey {
-                userid: results[0].id,
-                sesskey: &sess_key,
-                creationtime: time_now,
-                lastusedtime: time_now,
-            };
-
-            // Make the database insert
-            match diesel::insert_into(front_end_sess_keys::table)
-                .values(&new_sess)
-                .execute(&dat.db_conn)
-            {
-                Ok(1) => Ok(Response::Empty),
-                Ok(val) => {
-                    println!("Adding sess key other-than 1: {}", val);
-                    Err(DBError::InvalidDBResponse)},
-                Err(err) => {
-                    println!("Error {:?}", err);
-                    Err(DBError::InvalidDBResponse)},
-            }
-        }
-
-        fn add_ro_session_key(dat: &InThreadData, user: String, sess_key: String)
-                -> Result<Response, DBError>
-        {
-            // Generate current time
-            let time_now = Utc::now();
-
-            // Find the user_data that matches the username if there is one
-            let results = match ud_dsl.filter(user_data::username.eq(user))
-                .limit(5)
-                .load::<db_models::QueryUserData>(&dat.db_conn)
-            {
-                Ok(vals) => vals,
-                Err(err) => {
-                    println!("Error getting username: {}", err);
-                    return Err(DBError::InvalidUsername);},
-            };
-
-            // Make sure the returned values make a little sense
-            match results.len() {
-                0 => {
-                    return Err(DBError::InvalidUsername);
+            let result = match sess_type {
+                SessType::Frontend => {
+                    let new_sess = db_models::InsertFESessKey {
+                        userid: results[0].id,
+                        sesskey: &sess_key,
+                        creationtime: time_now,
+                        lastusedtime: time_now,
+                    };
+                    diesel::insert_into(front_end_sess_keys::table)
+                        .values(&new_sess)
+                        .execute(&dat.db_conn)
                 },
-                1 => {},
-                _ => {
-                    println!(
-                        "Error with add session key account db results: {}",
-                        results.len());
-                    return Err(DBError::InvalidDBResponse);
+                SessType::Roku => {
+                    let new_sess = db_models::InsertROSessKey {
+                        userid: results[0].id,
+                        sesskey: &sess_key,
+                        creationtime: time_now,
+                        lastusedtime: time_now,
+                    };
+                    diesel::insert_into(roku_sess_keys::table)
+                        .values(&new_sess)
+                        .execute(&dat.db_conn)
                 },
             };
 
-            // Build the sess key entry 
-            let new_sess = db_models::InsertROSessKey {
-                userid: results[0].id,
-                sesskey: &sess_key,
-                creationtime: time_now,
-                lastusedtime: time_now,
-            };
-
-            // Make the database insert
-            match diesel::insert_into(roku_sess_keys::table)
-                .values(&new_sess)
-                .execute(&dat.db_conn)
+            match result
             {
                 Ok(1) => Ok(Response::Empty),
                 Ok(val) => {
@@ -695,46 +685,74 @@ mod db {
         }
 
         fn validate_session_key(dat: &InThreadData, sess_type: SessType,
-            sess_key: String)
-                -> Result<Response, DBError>
+                sess_key: String)
+            -> Result<Response, DBError>
         {
-            match sess_type {
-                SessType::Frontend => Self::validate_fe_session_key(dat, sess_key),
-                SessType::Roku => Self::validate_ro_session_key(dat, sess_key),
-            }
-        }
-
-        fn validate_fe_session_key(dat: &InThreadData, sess_key: String)
-                -> Result<Response, DBError>
-        {
-            let results = match fesk_dsl.filter(front_end_sess_keys::sesskey.eq(sess_key))
-                .limit(5)
-                .load::<db_models::QueryFESessKey>(&dat.db_conn)
+            fn process_filt_result<T: SessKeyCommon>
+                (filt_results: Result<Vec<T>, diesel::result::Error>)
+                -> Result<db_models::SessKeyComponents, DBError>
             {
-                Ok(vals) => vals,
-                Err(err) => {
-                    println!("Error getting session key: {}", err);
+                let results = match filt_results
+                {
+                    Ok(vals) => vals,
+                    Err(err) => {
+                        println!("Error getting session key: {}", err);
+                        return Err(DBError::InvalidDBResponse);
+                    },
+                };
+                
+                if results.len() != 1 {
+                    println!("Error with session key db results: {}", results.len());
                     return Err(DBError::InvalidDBResponse);
-                },
-            };
-            
-            if results.len() != 1 {
-                println!("Error with session key db results: {}", results.len());
-                return Err(DBError::InvalidDBResponse);
+                }
+
+                Ok(results[0].get_common())
             }
 
-            let result = &results[0];
+            // Do the database filter, then run process_filt_result
+            // That will result in match legs with the same type...
+            // Without processing to a common type before returning,
+            // the code won't compile because of different leg types.
+            let processed_result = match sess_type {
+                SessType::Frontend =>
+                    process_filt_result(
+                        fesk_dsl.filter(front_end_sess_keys::sesskey.eq(sess_key))
+                            .limit(5)
+                            .load::<db_models::QueryFESessKey>(&dat.db_conn)
+                    ),
+                SessType::Roku =>
+                    process_filt_result(
+                        rosk_dsl.filter(roku_sess_keys::sesskey.eq(sess_key))
+                            .limit(5)
+                            .load::<db_models::QueryROSessKey>(&dat.db_conn)
+                    ),
+            };
+            let result = match processed_result {
+                Ok(val) => val,
+                Err(err) => return Err(err),
+            };
 
             // Validate that session key hasn't expired
             let time_now = Utc::now();
 
+            let max_age = match sess_type {
+                SessType::Frontend => api::SESSION_COOKIE_FE_MAX_AGE,
+                SessType::Roku => api::SESSION_COOKIE_RO_MAX_AGE,
+            };
+
             let sess_key_age = time_now.signed_duration_since(
                 result.creationtime);
-            if sess_key_age > chrono::Duration::seconds(api::SESSION_COOKIE_FE_MAX_AGE.into()) {
+            if sess_key_age > chrono::Duration::seconds(max_age.into()) {
                 // Delete sess key
-                return match diesel::delete(fesk_dsl.find(result.id))
-                    .execute(&dat.db_conn)
-                {
+                let del_result = match sess_type {
+                    SessType::Frontend => 
+                        diesel::delete(fesk_dsl.find(result.id))
+                            .execute(&dat.db_conn),
+                    SessType::Roku => 
+                        diesel::delete(rosk_dsl.find(result.id))
+                            .execute(&dat.db_conn),
+                };
+                return match del_result {
                     // Return failed session key
                     Ok(1) => Ok(Response::ValidatedKey(false, 0)),
                     Ok(val) => {
@@ -747,71 +765,18 @@ mod db {
             }
 
             // Update last used time
-            match diesel::update(fesk_dsl.find(result.id))
-                .set((
-                    front_end_sess_keys::lastusedtime.eq(time_now),
-                ))
-                .execute(&dat.db_conn)
-            {
-                Ok(1) => Ok(Response::ValidatedKey(true, result.userid)),
-                Ok(val) => {
-                    println!("Updating lastusedtime returned other-than 1: {}", val);
-                    Err(DBError::InvalidDBResponse)},
-                Err(err) => {
-                    println!("Error updating lastusedtime {:?}", err);
-                    Err(DBError::InvalidDBResponse)},
-            }
-        }
-
-        fn validate_ro_session_key(dat: &InThreadData, sess_key: String)
-                -> Result<Response, DBError>
-        {
-            let results = match rosk_dsl.filter(roku_sess_keys::sesskey.eq(sess_key))
-                .limit(5)
-                .load::<db_models::QueryROSessKey>(&dat.db_conn)
-            {
-                Ok(vals) => vals,
-                Err(err) => {
-                    println!("Error getting session key: {}", err);
-                    return Err(DBError::InvalidDBResponse);
-                },
+            let upd_res = match sess_type {
+                SessType::Frontend =>
+                    diesel::update(fesk_dsl.find(result.id))
+                        .set((front_end_sess_keys::lastusedtime.eq(time_now),))
+                        .execute(&dat.db_conn),
+                SessType::Roku =>
+                    diesel::update(rosk_dsl.find(result.id))
+                        .set((roku_sess_keys::lastusedtime.eq(time_now),))
+                        .execute(&dat.db_conn),
             };
-            
-            if results.len() != 1 {
-                println!("Error with session key db results: {}", results.len());
-                return Err(DBError::InvalidDBResponse);
-            }
 
-            let result = &results[0];
-
-            // Validate that session key hasn't expired
-            let time_now = Utc::now();
-
-            let sess_key_age = time_now.signed_duration_since(
-                result.creationtime);
-            if sess_key_age > chrono::Duration::seconds(api::SESSION_COOKIE_RO_MAX_AGE.into()) {
-                // Delete sess key
-                return match diesel::delete(rosk_dsl.find(result.id))
-                    .execute(&dat.db_conn)
-                {
-                    // Return failed session key
-                    Ok(1) => Ok(Response::ValidatedKey(false, 0)),
-                    Ok(val) => {
-                        println!("Updating lastusedtime returned other-than 1: {}", val);
-                        Err(DBError::InvalidDBResponse)},
-                    Err(err) => {
-                        println!("Error updating lastusedtime {:?}", err);
-                        Err(DBError::InvalidDBResponse)},
-                };
-            }
-
-            // Update last used time
-            match diesel::update(rosk_dsl.find(result.id))
-                .set((
-                    roku_sess_keys::lastusedtime.eq(time_now),
-                ))
-                .execute(&dat.db_conn)
-            {
+            match upd_res {
                 Ok(1) => Ok(Response::ValidatedKey(true, result.userid)),
                 Ok(val) => {
                     println!("Updating lastusedtime returned other-than 1: {}", val);
@@ -822,12 +787,21 @@ mod db {
             }
         }
 
-        fn logout_fe_session_key(dat: &InThreadData, sess_key: String)
-                -> Result<Response, DBError>
+        fn logout_session_key(dat: &InThreadData, sess_type: SessType,
+                sess_key: String)
+            -> Result<Response, DBError>
         {
-            match diesel::delete(fesk_dsl.filter(front_end_sess_keys::sesskey.eq(sess_key)))
-                .execute(&dat.db_conn)
-            {
+            let result = match sess_type {
+                SessType::Frontend => 
+                    diesel::delete(fesk_dsl.filter(
+                            front_end_sess_keys::sesskey.eq(sess_key)
+                    )).execute(&dat.db_conn),
+                SessType::Roku => 
+                    diesel::delete(rosk_dsl.filter(
+                            roku_sess_keys::sesskey.eq(sess_key)
+                    )).execute(&dat.db_conn),
+            };
+            match result {
                 // Return failed session key
                 Ok(_) => Ok(Response::Empty),
                 Err(err) => {
@@ -1454,28 +1428,16 @@ mod api_handlers {
 
         let sess_key = gen_large_rand_str();
 
-        match sess_type {
-            SessType::Frontend => {
-                match db.please(Action::AddFESessKey {
-                    user: form_dat.username.clone(),
-                    sess_key: sess_key.clone(),
-                }).await {
-                    Ok(_) => {},
-                    Err(err) => {println!("Error adding session key: {}", err);
-                        return Err(reject::custom(Rejections::ErrorAddingSessionKey))},
-                };
-            },
-            SessType::Roku => {
-                match db.please(Action::AddROSessKey {
-                    user: form_dat.username.clone(),
-                    sess_key: sess_key.clone(),
-                }).await {
-                    Ok(_) => {},
-                    Err(err) => {println!("Error adding session key: {}", err);
-                        return Err(reject::custom(Rejections::ErrorAddingSessionKey))},
-                };
-            },
-        }
+        match db.please(Action::AddSessKey {
+            user: form_dat.username.clone(),
+            sess_type: sess_type.clone(),
+            sess_key: sess_key.clone(),
+        }).await {
+            Ok(_) => {},
+            Err(err) => {
+                println!("Error adding session key: {}", err);
+                return Err(reject::custom(Rejections::ErrorAddingSessionKey))},
+        };
 
         let max_age = match sess_type {
             SessType::Frontend => api::SESSION_COOKIE_FE_MAX_AGE,
@@ -1485,6 +1447,7 @@ mod api_handlers {
         println!("Authenticated {:?}: {:?} key {}", sess_type, form_dat, sess_key);
 
         // Add the session key as content if this is a roku auth
+        // TODO: make it so we don't have to do that anymore...
         let base_reply = match sess_type {
             SessType::Roku => warp::reply::html(sess_key.clone()),
             _ => warp::reply::html("".to_string()),
@@ -1596,7 +1559,8 @@ mod api_handlers {
         let (sess_key, _user_id) = sess_info;
 
         // TODO - what's the right response?
-        match db.please(Action::LogoutFESessKey {
+        match db.please(Action::LogoutSessKey {
+            sess_type: SessType::Frontend,
             sess_key: sess_key,
         }).await {
             Ok(_) => Ok(StatusCode::OK),
