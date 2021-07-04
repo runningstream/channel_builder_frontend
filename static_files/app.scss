@@ -75,7 +75,12 @@ div {
     left: 0px;
     top: 0px;
 
-    background-color: $ltolive;
+    background-color: $scarlet;
+}
+
+#header_area div {
+    display: flex;
+    flex-direction: row-reverse;
 }
 
 #screen_area {
@@ -103,6 +108,19 @@ input[type="button"] {
     background-color: $scarlet;
     border: 1px $ltolive solid;
     border-radius: $border_radius;
+}
+
+#profile_button, #logout_button {
+    background-size: cover;
+    height: 2em;
+    width: 2em;
+}
+#profile_button {
+    background-image: url("img/user_profile.svg");
+}
+
+#logout_button {
+    background-image: url("img/logout.svg");
 }
 
 @media (max-width: 700px) {

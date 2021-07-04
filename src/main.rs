@@ -3,31 +3,43 @@
 
 pub mod schema;
 
+fn get_env_param(param_name: &str, default_val: Option<&str>) -> String {
+    let param_file_name = format!("{}_FILE", param_name.clone());
+
+    match std::env::var(param_name) {
+        Ok(val) => val,
+        Err(_) => match std::env::var(param_file_name.clone()) {
+            Ok(filename) => match std::fs::read_to_string(filename.clone()) {
+                Ok(val) => val.trim().to_string(),
+                Err(err) => panic!("Error reading {} file {}: {:?}", 
+                    param_file_name, filename, err),
+            }
+            Err(_) => match default_val {
+                Some(val) => val.to_string(),
+                None => panic!("Value must be specified for env var {}", param_name),
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
 
     // Get some parameters from the environment
-    let db_password = match std::env::var("POSTGRES_PASSWORD_FILE") {
-        Ok(filename) => match std::fs::read_to_string(filename) {
-            Ok(val) => val.trim().to_string(),
-            Err(err) => panic!("Error reading postgres password file: {:?}", err),
-        },
-        Err(_) => match std::env::var("POSTGRES_PASSWORD") {
-            Ok(password) => password,
-            Err(err) => panic!(concat!("No postgress password supplied ",
-                    "as envionment variable: {:?}"),
-                err),
-        },
-    };
+    let db_password = get_env_param("POSTGRES_PASSWORD", None);
+    let db_host = get_env_param("POSTGRES_HOST", Some("localhost:5432"));
+    let server_address = get_env_param("CB_LISTEN", Some("127.0.0.1:3031"));
+    let frontend_loc = get_env_param("FRONTEND_LOC",
+        Some("http://localhost:8080"));
+    let smtp_server = get_env_param("SMTP_SERVER", Some("localhost"));
+    let smtp_port_str = get_env_param("SMTP_PORT", Some("25"));
+    let smtp_username = get_env_param("SMTP_USERNAME", Some("webmaster"));
+    let smtp_password = get_env_param("SMTP_PASSWORD", Some(""));
+    let email_from = get_env_param("EMAIL_FROM_ADDR", Some("webmaster@localhost"));
 
-    let db_host = match std::env::var("POSTGRES_HOST") {
-        Ok(host) => host,
-        Err(_) => "localhost:3031".to_string(),
-    };
-
-    let server_address = match std::env::var("CB_LISTEN") {
-        Ok(addr) => addr,
-        Err(_) => "127.0.0.1:3031".to_string(),
+    let smtp_port: u16 = match smtp_port_str.parse() {
+        Ok(val) => val,
+        Err(err) => panic!("Error parsing smtp_port: {}", err),
     };
 
     // Setup DB with arc mutex
@@ -36,9 +48,10 @@ async fn main() {
     let db = db::Db::new(&db_url);
 
     // Setup email handler?
-    //let email = 
+    let email = email::Email::new(smtp_server, smtp_port, smtp_username,
+        smtp_password, email_from, frontend_loc.clone());
 
-    let api = api::build_filters(db.clone());
+    let api = api::build_filters(db, email, frontend_loc);
     let server_sockaddr: std::net::SocketAddr = server_address
         .parse()
         .expect("Unable to parse socket address");
@@ -123,6 +136,195 @@ mod db_models {
     }
 }
 
+mod email {
+    use std::time;
+    use std::sync::{Arc, mpsc};
+    use tokio::task;
+    use tokio::sync::Mutex;
+    use lettre::transport::smtp::{authentication, client};
+    use lettre::message::{MultiPart, Mailbox};
+    use lettre::address::AddressError;
+    use lettre::{Address, Transport};
+
+    const EMAIL_PERIOD: u64 = 10; // seconds
+
+    /*
+    #[derive(Debug, Clone)]
+    pub enum EmailError {
+        MessageBuildFailure, MessageSendFailure, InvalidAddress
+    }
+
+    impl fmt::Display for EmailError {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "Error {:?}", *self)
+        }
+    }
+    */
+
+    pub fn parse_addr(addr: &str) -> Result<Mailbox, AddressError> {
+        let address: Address = addr.parse()?;
+        Ok(Mailbox::new(None, address))
+    }
+
+    #[derive(Clone)]
+    pub struct Email {
+        email_tx: Arc<Mutex<mpsc::Sender<Action>>>,
+        //handler_thread: task::JoinHandle<()>,
+    }
+
+    #[derive(Clone)]
+    struct InThreadData {
+        smtp_server: String,
+        smtp_port: u16,
+        smtp_username: String,
+        smtp_password: String,
+        base_reg_msg: lettre::message::MessageBuilder,
+        frontend_loc_str: String,
+    }
+
+    #[derive(Clone)]
+    pub struct RegisterData {
+        pub dest_addr: String,
+        pub reg_key: String,
+    }
+
+    #[derive(Clone)]
+    pub enum Action {
+        SendRegAcct(RegisterData),
+    }
+
+    impl Email {
+        pub fn new(smtp_server: String, smtp_port: u16, smtp_username: String,
+                smtp_password: String, email_from: String, frontend_loc_str: String)
+            -> Self
+        {
+            let from_addr = match parse_addr(&email_from.clone()) {
+                Ok(addr) => addr,
+                Err(err) => panic!("Failed to parse email addr {} - {}",
+                    email_from, err),
+            };
+
+            let base_reg_msg = lettre::Message::builder()
+                .from(from_addr)
+                .subject("Running Stream: Verify Your Account");
+
+
+            let in_thread_data = InThreadData {
+                smtp_server,
+                smtp_port,
+                smtp_username,
+                smtp_password,
+                base_reg_msg,
+                frontend_loc_str,
+            };
+
+            // Create channel
+            let (email_tx_base, email_rx) = mpsc::channel();
+
+            // Allow email_tx to work nicely with tokio threads and sync
+            let email_tx = Arc::new(Mutex::new(email_tx_base));
+
+            // Spawn blocking task
+            let _handler_thread = task::spawn_blocking(move || {
+                Self::handle_emails(in_thread_data, email_rx)
+            });
+
+            Self {
+                email_tx,
+                //handler_thread,
+            }
+        }
+
+        pub async fn please(&self, action: Action) -> () {
+            // Send the message to the email handler thread
+            match self.email_tx.lock().await.send(action) {
+                Ok(_) => (),
+                Err(err) => {panic!("Email request failed! Dying: {}", err);},
+            }
+        }
+
+        fn handle_emails(dat: InThreadData, email_rx: mpsc::Receiver<Action>) -> () {
+            let sleep_time = time::Duration::from_secs(EMAIL_PERIOD);
+
+            let creds = authentication::Credentials::
+                new(dat.smtp_username.clone(), dat.smtp_password.clone());
+
+            let tls_params = match client::TlsParameters::
+                new(dat.smtp_server.clone())
+            {
+                Ok(params) => params,
+                Err(err) => panic!("Failed building tls params: {}", err),
+            };
+
+            let smtp = match lettre::SmtpTransport::relay(&dat.smtp_server) {
+                Ok(builder) => builder
+                    .credentials(creds)
+                    .tls(client::Tls::Required(tls_params))
+                    .port(dat.smtp_port)
+                    .build(),
+                Err(err) => panic!("Failed building smtp: {}", err),
+            };
+
+            loop {
+                std::thread::sleep(sleep_time);
+                
+                while let Some(msg) = match email_rx.try_recv() {
+                    Ok(msg) => Some(msg), 
+                    Err(mpsc::TryRecvError::Empty) => None,
+                    Err(mpsc::TryRecvError::Disconnected) => { 
+                        panic!("Email sender disconnected!");
+                    },
+                } {
+                    match msg {
+                        Action::SendRegAcct(reg_dat) => 
+                            Self::send_reg_acct(smtp.clone(), dat.clone(), reg_dat),
+                    }
+                }
+            }
+        }
+
+        fn send_reg_acct(smtp: lettre::SmtpTransport, dat: InThreadData,
+                reg_dat: RegisterData)
+            -> ()
+        {
+            let text_msg = format!("Welcome to Running Stream - build your own Roku channel!  Please paste the following link into your browser to complete registration {}/?val_code={} - if you did not attempt to register at Running Stream please just delete this email.", dat.frontend_loc_str, reg_dat.reg_key);
+            let html_msg = format!("<p>Welcome to Running Stream - build your own Roku channel!</p>  <p><a href=\"{}/?val_code={}\">Please click here to complete registration</a></p>  <p>If you did not attempt to register at Running Stream please just delete this email.</p>", dat.frontend_loc_str, reg_dat.reg_key);
+
+            let dest_addr_addr = match parse_addr(&reg_dat.dest_addr) {
+                Ok(addr) => addr,
+                Err(err) => {
+                    println!("Failed to parse email addr {} - {}",
+                        reg_dat.dest_addr, err);
+                    return;
+                },
+            };
+
+            let msg = match dat.base_reg_msg.clone()
+                .to(dest_addr_addr)
+                .multipart(MultiPart::alternative_plain_html(
+                    text_msg,
+                    html_msg,
+                ))
+            {
+                Ok(val) => val,
+                Err(err) => {
+                    println!("Failed to build message: {:?}", err);
+                    return;
+                },
+            };
+
+            match smtp.send(&msg) {
+                Ok(_) => {
+                    println!("Registration email sent successfully");
+                },
+                Err(e) => {
+                    println!("Error sending registration email: {:?}", e);
+                },
+            };
+        }
+    }
+}
+
 mod db {
     use super::{password_hash_version, db_models, api, helpers};
     use super::api::SessType;
@@ -131,8 +333,9 @@ mod db {
     use diesel::RunQueryDsl;
     use diesel::result::Error::NotFound;
     use std::fmt;
-    use tokio::sync::Mutex;
-    use std::sync::Arc;
+    use std::sync::mpsc;
+    use tokio::task;
+    use tokio::sync::oneshot;
     use chrono::Utc;
     use crate::diesel::{QueryDsl, ExpressionMethods};
     use crate::schema::{user_data, channel_list, front_end_sess_keys, roku_sess_keys};
@@ -152,25 +355,53 @@ mod db {
         JSONConversionError,
         EntryAlreadyExists,
         NoEntryReturned,
+        ThreadResponseFailure,
     }
 
     impl fmt::Display for DBError {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            match *self {
-                DBError::PassHashError => write!(f, "Error hashing password"),
-                DBError::InvalidDBResponse => write!(f, "Invalid DB response"),
-                DBError::InvalidValidationCode => write!(f, "Invalid validation code"),
-                DBError::InvalidUsername => write!(f, "Invalid username"),
-                DBError::JSONConversionError => write!(f, "JSON conversion error"),
-                DBError::EntryAlreadyExists => write!(f, "Entry already exists"),
-                DBError::NoEntryReturned => write!(f, "No entry returned"),
-            }
+            write!(f, "Error: {:?}", *self)
         }
     }
 
     #[derive(Clone)]
     pub struct Db {
-        db_arc: Arc<Mutex<PgConnection>>,
+        db_tx: mpsc::SyncSender<Message>,
+    }
+
+    struct InThreadData {
+        db_conn: PgConnection,
+    }
+
+    #[derive(Clone)]
+    pub enum Action {
+        AddUser { user: String, pass: String, reg_key: String },
+        ValidateAccount { val_code: String },
+        AddFESessKey { user: String, sess_key: String },
+        AddROSessKey { user: String, sess_key: String },
+        ValidateSessKey { sess_type: SessType, sess_key: String },
+        LogoutFESessKey { sess_key: String },
+        GetUserPassHash { user: String },
+        GetChannelLists { user_id: i32 },
+        GetChannelList { user_id: i32, list_name: String },
+        SetChannelList { user_id: i32, list_name: String, list_data: String },
+        CreateChannelList { user_id: i32, list_name: String },
+        GetActiveChannel { user_id: i32 },
+        SetActiveChannel { user_id: i32, list_name: String },
+    }
+
+    #[derive(Clone)]
+    pub enum Response {
+        Empty,
+        Bool(bool),
+        StringResp(String),
+        ValidatedKey(bool, i32),
+        UserPassHash(String, i32, bool),
+    }
+
+    struct Message {
+        resp: oneshot::Sender<Result<Response, DBError>>,
+        action: Action,
     }
 
     impl Db {
@@ -190,20 +421,94 @@ mod db {
                 Err(err) => println!("Error during migrations: {:?}", err),
             };
 
-            let db_arc = Arc::new(Mutex::new(db_conn));
+            let in_thread_data = InThreadData {
+                db_conn,
+            };
+
+            let (db_tx, db_rx) = mpsc::sync_channel(100*1024);
+
+            let _handler_thread = task::spawn_blocking(move || {
+                Self::handle_db_calls(in_thread_data, db_rx);
+            });
 
             Self {
-                db_arc,
+                db_tx
             }
         }
 
-        pub async fn add_user(&self, user: &str, pass: &str, reg_key: &str)
-                -> Result<(), DBError>
-        {
-            // TODO email vaildation
+        pub async fn please(&self, action: Action) -> Result<Response, DBError> {
+            let (tx, rx) = oneshot::channel();
 
+            let msg = Message {
+                resp: tx,
+                action: action,
+            };
+
+            match self.db_tx.send(msg) {
+                Ok(_) => {
+                    match rx.await {
+                        Ok(result) => result,
+                        Err(err) => {
+                            println!("Error getting result from database thread: {}", err);
+                            Err(DBError::ThreadResponseFailure)
+                        }
+                    }
+                },
+                Err(err) => {panic!("DB request failed! Dying: {}", err);},
+            }
+        }
+
+        fn handle_db_calls(dat: InThreadData, db_rx: mpsc::Receiver<Message>)
+            -> ()
+        {
+            while let Some(msg) = match db_rx.recv() {
+                Ok(msg) => Some(msg),
+                Err(_err) => {
+                    panic!("DB sender disconnected!");
+                }
+            } {
+                let result = match msg.action {
+                    Action::AddUser { user, pass, reg_key }=>
+                        Self::add_user(&dat, user, pass, reg_key),
+                    Action::ValidateAccount { val_code } =>
+                        Self::validate_account(&dat, val_code),
+                    Action::AddFESessKey { user, sess_key } =>
+                        Self::add_fe_session_key(&dat, user, sess_key),
+                    Action::AddROSessKey { user, sess_key } =>
+                        Self::add_ro_session_key(&dat, user, sess_key),
+                    Action::ValidateSessKey { sess_type, sess_key } =>
+                        Self::validate_session_key(&dat, sess_type, sess_key),
+                    Action::LogoutFESessKey { sess_key } =>
+                        Self::logout_fe_session_key(&dat, sess_key),
+                    Action::GetUserPassHash { user } =>
+                        Self::get_user_passhash(&dat, user),
+                    Action::GetChannelLists { user_id } =>
+                        Self::get_channel_lists(&dat, user_id),
+                    Action::GetChannelList { user_id, list_name } =>
+                        Self::get_channel_list(&dat, user_id, list_name),
+                    Action::SetChannelList { user_id, list_name, list_data } =>
+                        Self::set_channel_list(&dat, user_id, list_name, list_data),
+                    Action::CreateChannelList { user_id, list_name } =>
+                        Self::create_channel_list(&dat, user_id, list_name),
+                    Action::GetActiveChannel { user_id } =>
+                        Self::get_active_channel(&dat, user_id),
+                    Action::SetActiveChannel { user_id, list_name } =>
+                        Self::set_active_channel(&dat, user_id, list_name),
+                };
+                match msg.resp.send(result) {
+                    Ok(_) => {},
+                    Err(_) => {
+                        println!("Failed to send database response to requestor...");
+                    },
+                };
+            }
+        }
+
+        fn add_user(dat: &InThreadData, user: String, pass: String, reg_key: String)
+            -> Result<Response, DBError>
+        {
             // Generate the password hash
-            let pw_hash = match password_hash_version::hash_pw(user, pass) {
+            let pw_hash = match password_hash_version::hash_pw(&user, &pass) {
                 Ok(val) => val,
                 Err(err) => {
                     println!("Error hashing password: {}", err);
@@ -212,22 +517,19 @@ mod db {
 
             // Build the new user data
             let new_user = db_models::InsertUserData {
-                username: user,
+                username: &user,
                 pass_hash: &pw_hash,
                 pass_hash_type: password_hash_version::get_pw_ver(),
                 validation_status: false,
-                validation_code: reg_key,
+                validation_code: &reg_key,
             };
-
-            // Lock the database connection
-            let db_conn = self.db_arc.lock().await;
 
             // Make the database insert
             match diesel::insert_into(user_data::table)
                 .values(&new_user)
-                .execute(& *db_conn)
+                .execute(&dat.db_conn)
             {
-                Ok(1) => Ok(()),
+                Ok(1) => Ok(Response::Empty),
                 Ok(val) => {
                     println!("Adding user returned other-than 1: {}", val);
                     Err(DBError::InvalidDBResponse)},
@@ -237,16 +539,13 @@ mod db {
             }
         }
 
-        pub async fn validate_account(&self, val_code: &str)
-            -> Result<bool, DBError>
+        fn validate_account(dat: &InThreadData, val_code: String)
+            -> Result<Response, DBError>
         {
-            // Lock the database
-            let db_conn = self.db_arc.lock().await;
-
             // Find the user_data that matches the val_code if there is one
             let results = match ud_dsl.filter(user_data::validation_code.eq(val_code))
                 .limit(5)
-                .load::<db_models::QueryUserData>(& *db_conn)
+                .load::<db_models::QueryUserData>(&dat.db_conn)
             {
                 Ok(vals) => vals,
                 Err(err) => {
@@ -275,9 +574,9 @@ mod db {
                     user_data::validation_status.eq(true),
                     user_data::validation_code.eq::<Option<String>>(None),
                 ))
-                .execute(& *db_conn)
+                .execute(&dat.db_conn)
             {
-                Ok(1) => Ok(true),
+                Ok(1) => Ok(Response::Bool(true)),
                 Ok(val) => {
                     println!("Updating status returned other-than 1: {}", val);
                     Err(DBError::InvalidDBResponse)},
@@ -287,19 +586,16 @@ mod db {
             }
         }
 
-        pub async fn add_fe_session_key(&self, user: &str, sess_key: &str)
-                -> Result<(), DBError>
+        fn add_fe_session_key(dat: &InThreadData, user: String, sess_key: String)
+                -> Result<Response, DBError>
         {
             // Generate current time
             let time_now = Utc::now();
 
-            // Lock the database
-            let db_conn = self.db_arc.lock().await;
-
             // Find the user_data that matches the username if there is one
             let results = match ud_dsl.filter(user_data::username.eq(user))
                 .limit(5)
-                .load::<db_models::QueryUserData>(& *db_conn)
+                .load::<db_models::QueryUserData>(&dat.db_conn)
             {
                 Ok(vals) => vals,
                 Err(err) => {
@@ -314,7 +610,9 @@ mod db {
                 },
                 1 => {},
                 _ => {
-                    println!("Error with add session key account db results: {}", results.len());
+                    println!(
+                        "Error with add session key account db results: {}",
+                        results.len());
                     return Err(DBError::InvalidDBResponse);
                 },
             };
@@ -322,7 +620,7 @@ mod db {
             // Build the sess key entry 
             let new_sess = db_models::InsertFESessKey {
                 userid: results[0].id,
-                sesskey: sess_key,
+                sesskey: &sess_key,
                 creationtime: time_now,
                 lastusedtime: time_now,
             };
@@ -330,9 +628,9 @@ mod db {
             // Make the database insert
             match diesel::insert_into(front_end_sess_keys::table)
                 .values(&new_sess)
-                .execute(& *db_conn)
+                .execute(&dat.db_conn)
             {
-                Ok(1) => Ok(()),
+                Ok(1) => Ok(Response::Empty),
                 Ok(val) => {
                     println!("Adding sess key other-than 1: {}", val);
                     Err(DBError::InvalidDBResponse)},
@@ -342,19 +640,16 @@ mod db {
             }
         }
 
-        pub async fn add_ro_session_key(&self, user: &str, sess_key: &str)
-                -> Result<(), DBError>
+        fn add_ro_session_key(dat: &InThreadData, user: String, sess_key: String)
+                -> Result<Response, DBError>
         {
             // Generate current time
             let time_now = Utc::now();
 
-            // Lock the database
-            let db_conn = self.db_arc.lock().await;
-
             // Find the user_data that matches the username if there is one
             let results = match ud_dsl.filter(user_data::username.eq(user))
                 .limit(5)
-                .load::<db_models::QueryUserData>(& *db_conn)
+                .load::<db_models::QueryUserData>(&dat.db_conn)
             {
                 Ok(vals) => vals,
                 Err(err) => {
@@ -369,7 +664,9 @@ mod db {
                 },
                 1 => {},
                 _ => {
-                    println!("Error with add session key account db results: {}", results.len());
+                    println!(
+                        "Error with add session key account db results: {}",
+                        results.len());
                     return Err(DBError::InvalidDBResponse);
                 },
             };
@@ -377,7 +674,7 @@ mod db {
             // Build the sess key entry 
             let new_sess = db_models::InsertROSessKey {
                 userid: results[0].id,
-                sesskey: sess_key,
+                sesskey: &sess_key,
                 creationtime: time_now,
                 lastusedtime: time_now,
             };
@@ -385,9 +682,9 @@ mod db {
             // Make the database insert
             match diesel::insert_into(roku_sess_keys::table)
                 .values(&new_sess)
-                .execute(& *db_conn)
+                .execute(&dat.db_conn)
             {
-                Ok(1) => Ok(()),
+                Ok(1) => Ok(Response::Empty),
                 Ok(val) => {
                     println!("Adding sess key other-than 1: {}", val);
                     Err(DBError::InvalidDBResponse)},
@@ -397,22 +694,22 @@ mod db {
             }
         }
 
-        pub async fn validate_session_key(&self, sess_type: SessType, sess_key: &str)
-                -> Result<(bool, i32), DBError>
+        fn validate_session_key(dat: &InThreadData, sess_type: SessType,
+            sess_key: String)
+                -> Result<Response, DBError>
         {
             match sess_type {
-                SessType::Frontend => self.validate_fe_session_key(sess_key).await,
-                SessType::Roku => self.validate_ro_session_key(sess_key).await,
+                SessType::Frontend => Self::validate_fe_session_key(dat, sess_key),
+                SessType::Roku => Self::validate_ro_session_key(dat, sess_key),
             }
         }
 
-        async fn validate_fe_session_key(&self, sess_key: &str)
-                -> Result<(bool, i32), DBError>
+        fn validate_fe_session_key(dat: &InThreadData, sess_key: String)
+                -> Result<Response, DBError>
         {
-            let db_conn = self.db_arc.lock().await;
             let results = match fesk_dsl.filter(front_end_sess_keys::sesskey.eq(sess_key))
                 .limit(5)
-                .load::<db_models::QueryFESessKey>(& *db_conn)
+                .load::<db_models::QueryFESessKey>(&dat.db_conn)
             {
                 Ok(vals) => vals,
                 Err(err) => {
@@ -436,10 +733,10 @@ mod db {
             if sess_key_age > chrono::Duration::seconds(api::SESSION_COOKIE_FE_MAX_AGE.into()) {
                 // Delete sess key
                 return match diesel::delete(fesk_dsl.find(result.id))
-                    .execute(& *db_conn)
+                    .execute(&dat.db_conn)
                 {
                     // Return failed session key
-                    Ok(1) => Ok((false, 0)),
+                    Ok(1) => Ok(Response::ValidatedKey(false, 0)),
                     Ok(val) => {
                         println!("Updating lastusedtime returned other-than 1: {}", val);
                         Err(DBError::InvalidDBResponse)},
@@ -454,9 +751,9 @@ mod db {
                 .set((
                     front_end_sess_keys::lastusedtime.eq(time_now),
                 ))
-                .execute(& *db_conn)
+                .execute(&dat.db_conn)
             {
-                Ok(1) => Ok((true, result.userid)),
+                Ok(1) => Ok(Response::ValidatedKey(true, result.userid)),
                 Ok(val) => {
                     println!("Updating lastusedtime returned other-than 1: {}", val);
                     Err(DBError::InvalidDBResponse)},
@@ -466,13 +763,12 @@ mod db {
             }
         }
 
-        async fn validate_ro_session_key(&self, sess_key: &str)
-                -> Result<(bool, i32), DBError>
+        fn validate_ro_session_key(dat: &InThreadData, sess_key: String)
+                -> Result<Response, DBError>
         {
-            let db_conn = self.db_arc.lock().await;
             let results = match rosk_dsl.filter(roku_sess_keys::sesskey.eq(sess_key))
                 .limit(5)
-                .load::<db_models::QueryROSessKey>(& *db_conn)
+                .load::<db_models::QueryROSessKey>(&dat.db_conn)
             {
                 Ok(vals) => vals,
                 Err(err) => {
@@ -496,10 +792,10 @@ mod db {
             if sess_key_age > chrono::Duration::seconds(api::SESSION_COOKIE_RO_MAX_AGE.into()) {
                 // Delete sess key
                 return match diesel::delete(rosk_dsl.find(result.id))
-                    .execute(& *db_conn)
+                    .execute(&dat.db_conn)
                 {
                     // Return failed session key
-                    Ok(1) => Ok((false, 0)),
+                    Ok(1) => Ok(Response::ValidatedKey(false, 0)),
                     Ok(val) => {
                         println!("Updating lastusedtime returned other-than 1: {}", val);
                         Err(DBError::InvalidDBResponse)},
@@ -514,9 +810,9 @@ mod db {
                 .set((
                     roku_sess_keys::lastusedtime.eq(time_now),
                 ))
-                .execute(& *db_conn)
+                .execute(&dat.db_conn)
             {
-                Ok(1) => Ok((true, result.userid)),
+                Ok(1) => Ok(Response::ValidatedKey(true, result.userid)),
                 Ok(val) => {
                     println!("Updating lastusedtime returned other-than 1: {}", val);
                     Err(DBError::InvalidDBResponse)},
@@ -526,29 +822,26 @@ mod db {
             }
         }
 
-        pub async fn logout_fe_session_key(&self, sess_key: &str)
-                -> Result<(), DBError>
+        fn logout_fe_session_key(dat: &InThreadData, sess_key: String)
+                -> Result<Response, DBError>
         {
-            let db_conn = self.db_arc.lock().await;
-
             match diesel::delete(fesk_dsl.filter(front_end_sess_keys::sesskey.eq(sess_key)))
-                .execute(& *db_conn)
+                .execute(&dat.db_conn)
             {
                 // Return failed session key
-                Ok(_) => Ok(()),
+                Ok(_) => Ok(Response::Empty),
                 Err(err) => {
                     println!("Error updating lastusedtime {:?}", err);
                     Err(DBError::InvalidDBResponse)},
             }
         }
 
-        pub async fn get_user_passhash(&self, user: &str)
-            -> Result<(String, i32, bool), DBError>
+        fn get_user_passhash(dat: &InThreadData, user: String)
+            -> Result<Response, DBError>
         {
-            let db_conn = self.db_arc.lock().await;
             let results = match ud_dsl.filter(user_data::username.eq(user))
                 .limit(5)
-                .load::<db_models::QueryUserData>(& *db_conn)
+                .load::<db_models::QueryUserData>(&dat.db_conn)
             {
                 Ok(vals) => vals,
                 Err(err) => {
@@ -561,17 +854,19 @@ mod db {
                 return Err(DBError::InvalidDBResponse);
             }
 
-            Ok((results[0].pass_hash.clone(), results[0].pass_hash_type,
-                results[0].validation_status))
+            Ok(Response::UserPassHash(
+                results[0].pass_hash.clone(),
+                results[0].pass_hash_type,
+                results[0].validation_status
+            ))
         }
 
-        pub async fn get_channel_lists(&self, user_id: i32)
-            -> Result<String, DBError>
+        fn get_channel_lists(dat: &InThreadData, user_id: i32)
+            -> Result<Response, DBError>
         {
-            let db_conn = self.db_arc.lock().await;
             let results = match cl_dsl
                 .filter(channel_list::userid.eq(user_id))
-                .load::<db_models::QueryChannelList>(& *db_conn)
+                .load::<db_models::QueryChannelList>(&dat.db_conn)
             {
                 Ok(vals) => vals,
                 Err(err) => {
@@ -585,7 +880,7 @@ mod db {
             }).collect();
 
             match serde_json::to_string(&channel_names) {
-                Ok(val) => Ok(val),
+                Ok(val) => Ok(Response::StringResp(val)),
                 Err(err) => {
                     println!("Error converting channel_names to JSON: {}", err);
                     return Err(DBError::JSONConversionError);
@@ -593,17 +888,15 @@ mod db {
             }
         }
 
-        pub async fn get_channel_list(&self, user_id: i32, list_name: &str)
-            -> Result<String, DBError>
+        fn get_channel_list(dat: &InThreadData, user_id: i32, list_name: String)
+            -> Result<Response, DBError>
         {
-            let db_conn = self.db_arc.lock().await;
-
             // Get the channel
             let results = match cl_dsl
                 .filter(channel_list::userid.eq(user_id))
-                .filter(channel_list::name.eq(list_name))
+                .filter(channel_list::name.eq(&list_name))
                 .limit(5)
-                .load::<db_models::QueryChannelList>(& *db_conn)
+                .load::<db_models::QueryChannelList>(&dat.db_conn)
             {
                 Ok(vals) => vals,
                 Err(err) => {
@@ -622,23 +915,21 @@ mod db {
                 return Err(DBError::InvalidDBResponse);
             }
             
-            Ok(results[0].data.clone())
+            Ok(Response::StringResp(results[0].data.clone()))
         }
 
-        pub async fn set_channel_list(&self, user_id: i32, list_name: &str,
-            list_data: &str)
-            -> Result<(), DBError>
+        fn set_channel_list(dat: &InThreadData, user_id: i32, list_name: String,
+            list_data: String)
+            -> Result<Response, DBError>
         {
-            let db_conn = self.db_arc.lock().await;
-
             match diesel::update(cl_dsl
                     .filter(channel_list::userid.eq(user_id))
-                    .filter(channel_list::name.eq(list_name))
+                    .filter(channel_list::name.eq(&list_name))
                 )
                 .set(channel_list::data.eq(list_data))
-                .execute(& *db_conn)
+                .execute(&dat.db_conn)
             {
-                Ok(1) => Ok(()),
+                Ok(1) => Ok(Response::Empty),
                 Ok(val) => {
                     println!(concat!(
                             "Updating channel list returned other-than 1: ",
@@ -655,16 +946,14 @@ mod db {
             }
         }
 
-        pub async fn create_channel_list(&self, user_id: i32, list_name: &str)
-            -> Result<(), DBError>
+        fn create_channel_list(dat: &InThreadData, user_id: i32, list_name: String)
+            -> Result<Response, DBError>
         {
-            let db_conn = self.db_arc.lock().await;
-
             // See if the channel already exists
             match cl_dsl
                 .filter(channel_list::userid.eq(user_id))
-                .filter(channel_list::name.eq(list_name))
-                .first::<db_models::QueryChannelList>(& *db_conn)
+                .filter(channel_list::name.eq(&list_name))
+                .first::<db_models::QueryChannelList>(&dat.db_conn)
             {
                 Ok(_) => {
                     println!("Error creating channel - already exists",);
@@ -680,16 +969,16 @@ mod db {
             // If it doesn't, create it
             let new_channel = db_models::InsertChannelList {
                 userid: user_id,
-                name: list_name,
+                name: &list_name,
                 data: "{\"entries\": []}",
             };
 
             // Insert it
             match diesel::insert_into(channel_list::table)
                 .values(&new_channel)
-                .execute(& *db_conn)
+                .execute(&dat.db_conn)
             {
-                Ok(1) => Ok(()),
+                Ok(1) => Ok(Response::Empty),
                 Ok(val) => {
                     println!("Adding channel returned other-than 1: {}", val);
                     Err(DBError::InvalidDBResponse)},
@@ -699,11 +988,9 @@ mod db {
             }
         }
 
-        pub async fn get_active_channel(&self, user_id: i32)
-            -> Result<String, DBError>
+        fn get_active_channel(dat: &InThreadData, user_id: i32)
+            -> Result<Response, DBError>
         {
-            let db_conn = self.db_arc.lock().await;
-
             joinable!(user_data -> channel_list (active_channel) );
 
             let results = match channel_list::table
@@ -712,7 +999,7 @@ mod db {
                 //.filter(user_data::id.eq(user_id))
                 .select(channel_list::data)
                 .limit(5)
-                .load::<String>(& *db_conn)
+                .load::<String>(&dat.db_conn)
             {
                 Ok(vals) => vals,
                 Err(err) => {
@@ -732,20 +1019,18 @@ mod db {
                 },
             };
 
-            Ok(results[0].clone())
+            Ok(Response::StringResp(results[0].clone()))
         }
 
-        pub async fn set_active_channel(&self, user_id: i32, list_name: &str)
-            -> Result<(), DBError>
+        fn set_active_channel(dat: &InThreadData, user_id: i32, list_name: String)
+            -> Result<Response, DBError>
         {
-            let db_conn = self.db_arc.lock().await;
-
             // Get the channel
             let results = match cl_dsl
                 .filter(channel_list::userid.eq(user_id))
-                .filter(channel_list::name.eq(list_name))
+                .filter(channel_list::name.eq(&list_name))
                 .limit(5)
-                .load::<db_models::QueryChannelList>(& *db_conn)
+                .load::<db_models::QueryChannelList>(&dat.db_conn)
             {
                 Ok(vals) => vals,
                 Err(err) => {
@@ -767,9 +1052,9 @@ mod db {
             // Update the user to reflect the id
             match diesel::update(ud_dsl.find(user_id))
                 .set(user_data::active_channel.eq(results[0].id))
-                .execute(& *db_conn)
+                .execute(&dat.db_conn)
             {
-                Ok(1) => Ok(()),
+                Ok(1) => Ok(Response::Empty),
                 Ok(val) => {
                     println!(concat!(
                             "Updating active channel returned other-than 1: ",
@@ -789,7 +1074,8 @@ mod db {
 }
 
 mod api {
-    use super::{api_handlers, models, Rejections, db};
+    use super::{api_handlers, models, Rejections, db, email};
+    use db::{Action, Response};
     use warp::{Filter, reject, Rejection, Reply};
     use warp::http::StatusCode;
 
@@ -801,15 +1087,19 @@ mod api {
     #[derive(Debug, Clone)]
     pub enum SessType { Frontend, Roku }
 
-    pub fn build_filters(db: db::Db)
+    pub fn build_filters(db: db::Db, email: email::Email, cors_origin: String)
         -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
     {
+        let cors = warp::cors()
+            .allow_origin(cors_origin.as_str())
+            .allow_headers(vec!["sec-ch-ua"])
+            .allow_methods(vec!["GET", "POST"])
+            .allow_credentials(true);
+
         api_authenticate_fe(db.clone())
             .or(api_authenticate_ro(db.clone()))
-            .or(api_create_account(db.clone()))
+            .or(api_create_account(db.clone(), email.clone()))
             .or(api_validate_account(db.clone()))
-            .or(api_validate_session_fe(db.clone()))
-            .or(api_validate_session_ro(db.clone()))
             .or(api_logout_session_fe(db.clone()))
             .or(api_get_channel_lists(db.clone()))
             .or(api_get_channel_list(db.clone()))
@@ -817,11 +1107,15 @@ mod api {
             .or(api_set_channel_list(db.clone()))
             .or(api_create_channel_list(db.clone()))
             .or(api_set_active_channel(db.clone()))
-            .or(serve_static_index())
-            .or(serve_static_files())
+            .or(api_validate_session_fe(db.clone()))
+            .or(api_validate_session_ro(db.clone()))
+            //.or(serve_static_index())
+            //.or(serve_static_files())
+            .with(cors.clone())
             .recover(handle_rejection)
     }
 
+    /*
     fn serve_static_index()
         -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
     {
@@ -834,6 +1128,7 @@ mod api {
     {
         warp::fs::dir("static_files")
     }
+    */
 
     fn api_authenticate_fe(db: db::Db)
         -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
@@ -859,13 +1154,14 @@ mod api {
             .and_then(api_handlers::authenticate_ro)
     }
 
-    fn api_create_account(db: db::Db)
+    fn api_create_account(db: db::Db, email: email::Email)
         -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
     {
         // TODO Do I return neutral responses when the email already exists - failed?
         api_v1_path("create_account")
             .and(warp::post())
             .and(with_db(db))
+            .and(with_email(email))
             .and(get_form::<models::CreateAcctForm>())
             .and_then(api_handlers::create_account)
     }
@@ -992,9 +1288,20 @@ mod api {
             .and_then(move |session_id: String, db: db::Db| {
                 let sess_type = sess_type.clone();
                 async move {
-                    match db.validate_session_key(sess_type, &session_id).await {
-                        Ok((true, user_id)) => Ok((session_id, user_id)),
-                        Ok((false, _)) => Err(reject::custom(Rejections::InvalidSession)),
+                    match db.please(Action::ValidateSessKey {
+                        sess_type: sess_type,
+                        sess_key: session_id.clone(),
+                    }).await {
+                        Ok(Response::ValidatedKey(true, user_id)) =>
+                            Ok((session_id, user_id)),
+                        Ok(Response::ValidatedKey(false, _)) =>
+                            Err(reject::custom(Rejections::InvalidSession)),
+                        Ok(_) => {
+                            println!(
+                                "Invalid response when validating fe session"
+                            );
+                            Err(reject::custom(Rejections::InvalidSession))
+                        },
                         Err(err) => {
                             println!("Error validating fe session: {}", err);
                             Err(reject::custom(Rejections::InvalidSession))
@@ -1014,9 +1321,19 @@ mod api {
     }
 
     fn with_db(db: db::Db)
-        -> impl Filter<Extract = (db::Db,), Error = std::convert::Infallible> + Clone
+        -> impl Filter<Extract = (db::Db,),
+                Error = std::convert::Infallible>
+            + Clone
     {
         warp::any().map(move || db.clone())
+    }
+
+    fn with_email(email: email::Email)
+        -> impl Filter<Extract = (email::Email,),
+                Error = std::convert::Infallible>
+            + Clone
+    {
+        warp::any().map(move || email.clone())
     }
 
     async fn handle_rejection(err: Rejection)
@@ -1091,8 +1408,9 @@ mod models {
 }
 
 mod api_handlers {
-    use super::{models, db, password_hash_version, Rejections, api, helpers};
+    use super::{models, db, password_hash_version, Rejections, api, helpers, email};
     use super::api::SessType;
+    use db::{Action, Response};
     use rand::Rng;
     use warp::http::StatusCode;
     use warp::reject;
@@ -1114,10 +1432,19 @@ mod api_handlers {
         -> Result<impl warp::Reply, warp::Rejection>
     {
         let (pass_hash, hash_ver, valid_status) = 
-            match db.get_user_passhash(&form_dat.username).await {
-                Ok(vals) => vals,
-                Err(err) => {println!("Error getting user: {}", err);
-                    return Err(reject::custom(Rejections::InvalidUser));},
+            match db.please(Action::GetUserPassHash {
+                user: form_dat.username.clone(),
+            }).await {
+                Ok(Response::UserPassHash(pass_hash, hash_ver, valid_status)) => 
+                    (pass_hash, hash_ver, valid_status),
+                Ok(_) => {
+                    println!("Invalid type returned by GetUserPassHash");
+                    return Err(reject::custom(Rejections::InvalidUser));
+                },
+                Err(err) => {
+                    println!("Error getting user: {}", err);
+                    return Err(reject::custom(Rejections::InvalidUser));
+                },
             };
 
         if !valid_status {
@@ -1129,14 +1456,20 @@ mod api_handlers {
 
         match sess_type {
             SessType::Frontend => {
-                match db.add_fe_session_key(&form_dat.username, &sess_key).await {
+                match db.please(Action::AddFESessKey {
+                    user: form_dat.username.clone(),
+                    sess_key: sess_key.clone(),
+                }).await {
                     Ok(_) => {},
                     Err(err) => {println!("Error adding session key: {}", err);
                         return Err(reject::custom(Rejections::ErrorAddingSessionKey))},
                 };
             },
             SessType::Roku => {
-                match db.add_ro_session_key(&form_dat.username, &sess_key).await {
+                match db.please(Action::AddROSessKey {
+                    user: form_dat.username.clone(),
+                    sess_key: sess_key.clone(),
+                }).await {
                     Ok(_) => {},
                     Err(err) => {println!("Error adding session key: {}", err);
                         return Err(reject::custom(Rejections::ErrorAddingSessionKey))},
@@ -1175,26 +1508,55 @@ mod api_handlers {
         }
     }
 
-    pub async fn create_account(db: db::Db, form_dat: models::CreateAcctForm)
+    pub async fn create_account(db: db::Db, email_inst: email::Email,
+            form_dat: models::CreateAcctForm)
         -> Result<impl warp::Reply, warp::Rejection>
     {
+        // Fail early if the username is invalid
+        match email::parse_addr(&form_dat.username) {
+            Ok(_) => {},
+            Err(err) => {
+                println!("Requested username is invalid email: {}", err);
+                return Err(reject::custom(Rejections::ErrorCreatingUser));
+            }
+        };
+
         // TODO: handle properly when the rand number is already in the DB
         let reg_key = gen_large_rand_str();
         println!("Adding user with reg key ?val_code={}", reg_key);
 
-        match db.add_user(&form_dat.username, &form_dat.password, &reg_key).await {
-            Ok(_) => Ok(StatusCode::OK),
-            Err(err) => {println!("Error adding user: {}", err); 
-                Err(reject::custom(Rejections::ErrorCreatingUser))},
-        }
+        match db.please(Action::AddUser {
+            user: form_dat.username.clone(),
+            pass: form_dat.password,
+            reg_key: reg_key.clone(),
+        }).await {
+            Ok(_) => {},
+            Err(err) => {
+                println!("Error adding user: {}", err); 
+                return Err(reject::custom(Rejections::ErrorCreatingUser));
+            },
+        };
+
+        email_inst.please(email::Action::SendRegAcct(
+            email::RegisterData {
+                dest_addr: form_dat.username,
+                reg_key: reg_key,
+            }
+        )).await;
+
+        Ok(StatusCode::OK)
     }
 
     pub async fn validate_account(db: db::Db,
         opts: models::ValidateAccountRequest)
         -> Result<impl warp::Reply, warp::Rejection>
     {
-        match db.validate_account(&opts.val_code).await {
-            Ok(_) => Ok(StatusCode::OK),
+        match db.please(Action::ValidateAccount { val_code: opts.val_code }).await {
+            Ok(Response::Bool(true)) => Ok(StatusCode::OK),
+            Ok(_) => {
+                println!("Invalid validation code received."); 
+                Err(reject::custom(Rejections::InvalidValidationCode))
+            },
             Err(db::DBError::InvalidValidationCode) => {
                 println!("Invalid validation code received."); 
                 Err(reject::custom(Rejections::InvalidValidationCode))
@@ -1224,7 +1586,8 @@ mod api_handlers {
     {
         // If we can get to here, we're ok
         // TODO - what's the right response?
-        Ok(warp::reply::html("Valid"))
+        //Ok(warp::reply::html("Valid")) // For some reason, Rust won't compile if I use this
+        Ok(StatusCode::OK)
     }
 
     pub async fn logout_session_fe(db: db::Db, sess_info: (String, i32))
@@ -1233,7 +1596,9 @@ mod api_handlers {
         let (sess_key, _user_id) = sess_info;
 
         // TODO - what's the right response?
-        match db.logout_fe_session_key(&sess_key).await {
+        match db.please(Action::LogoutFESessKey {
+            sess_key: sess_key,
+        }).await {
             Ok(_) => Ok(StatusCode::OK),
             Err(err) => {println!("Error logging out account: {}", err); 
                 Err(reject::custom(Rejections::ErrorValidatingAccount))},
@@ -1245,8 +1610,13 @@ mod api_handlers {
     {
         let (_sess_key, user_id) = sess_info;
 
-        match db.get_channel_lists(user_id).await {
-            Ok(val) => Ok(warp::reply::html(val)),
+        match db.please(Action::GetChannelLists {
+            user_id: user_id,
+        }).await {
+            Ok(Response::StringResp(val)) => Ok(warp::reply::html(val)),
+            Ok(_) => {
+                println!("Invalid return type received from GetChannelLists");
+                Err(reject::custom(Rejections::ErrorGettingChannelLists))},
             Err(err) => {println!("Error getting channel lists: {}", err); 
                 Err(reject::custom(Rejections::ErrorGettingChannelLists))},
         }
@@ -1258,8 +1628,14 @@ mod api_handlers {
     {
         let (_sess_key, user_id) = sess_info;
 
-        match db.get_channel_list(user_id, &opts.list_name).await {
-            Ok(val) => Ok(warp::reply::html(val)),
+        match db.please(Action::GetChannelList {
+            user_id: user_id,
+            list_name: opts.list_name,
+        }).await {
+            Ok(Response::StringResp(val)) => Ok(warp::reply::html(val)),
+            Ok(_) => {
+                println!("Invalid return type received from GetChannelList");
+                Err(reject::custom(Rejections::ErrorGettingChannelList))},
             Err(err) => {println!("Error getting channel list: {}", err); 
                 Err(reject::custom(Rejections::ErrorGettingChannelList))},
         }
@@ -1270,10 +1646,18 @@ mod api_handlers {
     {
         let (_sess_key, user_id) = sess_info;
 
-        let channel_list = match db.get_active_channel(user_id).await {
-            Ok(val) => val,
-            Err(err) => {println!("Error getting active channel: {}", err); 
-                return Err(reject::custom(Rejections::ErrorGettingChannelList))},
+        let channel_list = match db.please(Action::GetActiveChannel {
+            user_id: user_id,
+        }).await {
+            Ok(Response::StringResp(val)) => val,
+            Ok(_) => {
+                println!("Invalid return type received from GetActiveChannel");
+                return Err(reject::custom(Rejections::ErrorGettingChannelList));
+            },
+            Err(err) => {
+                println!("Error getting active channel: {}", err); 
+                return Err(reject::custom(Rejections::ErrorGettingChannelList));
+            },
         };
 
         let json: serde_json::Value = match serde_json::from_str(&channel_list) {
@@ -1295,9 +1679,11 @@ mod api_handlers {
         // TODO validate that input is json
         // TODO convert to XML now?
 
-        match db.set_channel_list(user_id, &form_dat.listname,
-            &form_dat.listdata).await
-        {
+        match db.please(Action::SetChannelList {
+            user_id: user_id,
+            list_name: form_dat.listname,
+            list_data: form_dat.listdata,
+        }).await {
             Ok(_) => Ok(StatusCode::OK),
             Err(err) => {println!("Error setting channel list: {}", err); 
                 Err(reject::custom(Rejections::ErrorSettingChannelList))},
@@ -1310,7 +1696,10 @@ mod api_handlers {
     {
         let (_sess_key, user_id) = sess_info;
 
-        match db.create_channel_list(user_id, &form_dat.listname).await {
+        match db.please(Action::CreateChannelList {
+            user_id: user_id,
+            list_name: form_dat.listname,
+        }).await {
             Ok(_) => Ok(StatusCode::OK),
             Err(err) => {println!("Error creating channel list: {}", err); 
                 Err(reject::custom(Rejections::ErrorCreatingChannelList))},
@@ -1323,7 +1712,10 @@ mod api_handlers {
     {
         let (_sess_key, user_id) = sess_info;
 
-        match db.set_active_channel(user_id, &form_dat.listname).await {
+        match db.please(Action::SetActiveChannel {
+            user_id: user_id,
+            list_name: form_dat.listname,
+        }).await {
             Ok(_) => Ok(StatusCode::OK),
             Err(err) => {println!("Error setting active channel list: {}", err); 
                 Err(reject::custom(Rejections::ErrorSettingActiveChannel))},

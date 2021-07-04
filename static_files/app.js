@@ -15,9 +15,9 @@ function main() {
     }
 
     // Determine if we already have a valid session id, and if so jump to the main screen
-    $.ajax( "/api/v1/validate_session_fe", {
-        "method": "GET",
-    }).done( function() {
+    $.ajax( get_api_url("validate_session_fe"),
+        get_api_properties({"method": "GET"})
+    ).done( function() {
         // Display the main screen
         let main_screen = new MainScreen();
         main_screen.draw(HEAD_AREA, SCREEN_AREA, FOOT_AREA);
@@ -64,10 +64,9 @@ LoginScreen.prototype.draw = function (head_area, draw_area, foot_area) {
                 "username": $("#login_username").val(),
                 "password": $("#login_password").val(),
             };
-            $.ajax( "/api/v1/authenticate_fe", {
-                "method": "POST",
-                "data": login_dat,
-            }).done(function() {
+            $.ajax( get_api_url("authenticate_fe"),
+                get_api_properties({"method": "POST", "data": login_dat})
+            ).done(function() {
                 // TODO determine if we now have a session id, and if so, jump to the next part, otherwise display failure
                 let main_screen = new MainScreen();
                 main_screen.draw(head_area, draw_area, foot_area);
@@ -122,10 +121,9 @@ RegisterScreen.prototype.draw = function (head_area, draw_area, foot_area) {
                 "username": $("#reg_username").val(),
                 "password": $("#reg_password").val(),
             };
-            $.ajax( "/api/v1/create_account", {
-                "method": "POST",
-                "data": reg_dat,
-            }).done(function() {
+            $.ajax( get_api_url("create_account"),
+                get_api_properties({"method": "POST", "data": reg_dat})
+            ).done(function() {
                 // TODO determine whether it was successful and display a message
                 alert("User account requested, look for an email...");
                 let login_screen = new LoginScreen();
@@ -162,9 +160,9 @@ ValidationScreen.prototype.draw = function (head_area, draw_area, foot_area) {
             const urlParams = new URLSearchParams(window.location.search);
             const val_code = urlParams.get("val_code");
             
-            $.ajax( "/api/v1/validate_account?val_code="+val_code, {
-                "method": "GET",
-            }).done( function() {
+            $.ajax( get_api_url("validate_account?val_code="+val_code),
+                get_api_properties({"method": "GET"})
+            ).done( function() {
                 // TODO determine whether it was successful and display a message
                 alert("User validation successful!  Now login."); 
                 window.history.pushState("Account Validation", "Account Validation", "/");
@@ -213,20 +211,20 @@ MainScreen.prototype.draw = function (head_area, draw_area, foot_area) {
 
     let validate_button = $( '<input type="button" value="Validate Session">' )
         .click(function() {
-            $.ajax( "/api/v1/validate_session_fe", {
-                "method": "GET",
-            }).done( function() {
+            $.ajax( get_api_url("validate_session_fe"),
+                get_api_properties({"method": "GET"})
+            ).done( function() {
                 alert("Session validation successful."); 
             }).fail( function() {
                 alert("Fail");
             });
         });
 
-    let logout_button = $( '<input type="button" value="Logout">' )
+    let logout_button = $( '<div id="logout_button"></div>' )
         .click(function() {
-            $.ajax( "/api/v1/logout_session_fe", {
-                "method": "GET",
-            }).done( function() {
+            $.ajax( get_api_url("logout_session_fe"),
+                get_api_properties({"method": "GET"})
+            ).done( function() {
                 let login_screen = new LoginScreen();
                 login_screen.draw(head_area, draw_area, foot_area);
             }).fail( function() {
@@ -234,8 +232,12 @@ MainScreen.prototype.draw = function (head_area, draw_area, foot_area) {
             });
         });
 
+    let profile_area = $('<div id="profile_button"></div>');
+
     mgmt_button_area.append(validate_button);
     mgmt_button_area.append(logout_button);
+
+    mgmt_button_area.append(profile_area);
 
     content.append(channel_list_area);
     content.append(channel_edit_area);
@@ -259,9 +261,9 @@ function ChannelListList(channel_list_edit_area, chan_list_edit_button_dest) {
 
 ChannelListList.prototype.get_channel_lists_from_server = function () {
     let channellistlist = this;
-    $.ajax( "/api/v1/get_channel_lists", {
-        "method": "GET",
-    }).done( function(data_str) {
+    $.ajax( get_api_url("get_channel_lists"),
+        get_api_properties({"method": "GET"})
+    ).done( function(data_str) {
         channellistlist.channel_list_list = JSON.parse(data_str);
         channellistlist.draw_channel_list_list();
     }).fail( function() {
@@ -294,10 +296,9 @@ ChannelListList.prototype.draw_channel_list_list = function () {
                 "listname": $("#new_channel_list_name").val(),
             };
             channel_list_list.channel_list_list.push(data["listname"]);
-            $.ajax( "/api/v1/create_channel_list", {
-                "method": "POST",
-                "data": data,
-            }).done( function() {
+            $.ajax( get_api_url("create_channel_list"),
+                get_api_properties({"method": "POST", "data": data})
+            ).done( function() {
                 alert("Channel list created."); 
             }).fail( function() {
                 alert("Fail");
@@ -318,10 +319,9 @@ ChannelListList.prototype.draw_channel_list_list = function () {
                 "listname": channel_list_list.currently_selected.channel_name,
             };
             console.log(data);
-            $.ajax( "/api/v1/set_active_channel", {
-                "method": "POST",
-                "data": data,
-            }).done( function() {
+            $.ajax( get_api_url("set_active_channel"),
+                get_api_properties({"method": "POST", "data": data})
+            ).done( function() {
                 alert("Active channel set."); 
             }).fail( function() {
                 alert("Fail");
@@ -374,9 +374,9 @@ ChannelList.prototype.draw = function (draw_area) {
 
 ChannelList.prototype.get_channel_list_from_server = function () {
     let channellist = this;
-    $.ajax( "/api/v1/get_channel_list?list_name="+this.channel_name, {
-        "method": "GET",
-    }).done( function(data_str) {
+    $.ajax( get_api_url("get_channel_list?list_name="+this.channel_name),
+        get_api_properties({"method": "GET"})
+    ).done( function(data_str) {
         channellist.channel_list = JSON.parse(data_str);
         channellist.draw_channel_list();
     }).fail( function() {
@@ -391,10 +391,9 @@ ChannelList.prototype.put_channel_list_to_server = function() {
         "listname": this.channel_name,
         "listdata": JSON.stringify(this.channel_list),
     };
-    $.ajax( "/api/v1/set_channel_list", {
-        "method": "POST",
-        "data": list_dat,
-    }).done( function(data_str) {
+    $.ajax( get_api_url("set_channel_list"),
+        get_api_properties({"method": "POST", "data": list_dat})
+    ).done( function(data_str) {
         console.log("Successful update");
     }).fail( function() {
         // TODO improve
@@ -410,28 +409,35 @@ ChannelList.prototype.draw_channel_list = function() {
     let channel_edit_buttons = $( "<div></div>" );
     let channel_edit_list = $( '<div></div>' );
 
-    let new_name = $('<input type="textarea">');
+    let new_name = $('<input type="textarea" id="medianame">');
     let new_name_label = $('<label>Name: </label>');
     new_name_label.append(new_name);
 
-    let new_imgurl = $('<input type="textarea">');
+    let new_imgurl = $('<input type="textarea" id="imageurl">');
     let new_imgurl_label = $('<label>Image URL: </label>');
     new_imgurl_label.append(new_imgurl);
 
-    let new_vidurl = $('<input type="textarea">');
-    let new_vidurl_label = $('<label>Video URL: </label>');
+    let new_vidurl = $('<input type="textarea" id="mediaurl">');
+    let new_vidurl_label = $('<label>Media URL: </label>');
     new_vidurl_label.append(new_vidurl);
 
     let new_typesub = $('<input type="radio" value="sublist" name="thingtype">');
     let new_typesub_label = $('<label>Sublist</label>');
     new_typesub_label.append(new_typesub);
-    let new_typevid = $('<input type="radio" value="video" name="thingtype"checked="true">');
-    let new_typevid_label = $('<label>video</label>');
+    let new_typevid = $('<input type="radio" value="video" name="thingtype" checked="true">');
+    let new_typevid_label = $('<label>Media</label>');
     new_typevid_label.append(new_typevid);
+
+    let new_loop = $('<input type="checkbox" id="loopmedia" checked="false">');
+    let new_loop_label = $('<label>Loop Media</label>');
+    new_loop_label.append(new_loop);
 
     let new_videnc_mp4 = $('<input type="radio" value="mp4" name="videnctype" checked="true">');
     let new_videnc_mp4_label = $('<label>MP4</label>');
     new_videnc_mp4_label.append(new_videnc_mp4);
+    let new_videnc_aud = $('<input type="radio" value="audio" name="videnctype">');
+    let new_videnc_aud_label = $('<label>Audio</label>');
+    new_videnc_aud_label.append(new_videnc_aud);
 
 
     this.add_entry_button = $( '<input type="button" value="Add Entry">' )
@@ -459,7 +465,7 @@ ChannelList.prototype.draw_channel_list = function() {
             // Get radio button value
             const videnctype = $('input[name="videnctype"]:checked').val();
 
-            const result = channellist.change_vals(new_name.val(), new_imgurl.val(), new_vidurl.val(), videnctype);
+            const result = channellist.change_vals(new_name.val(), new_imgurl.val(), new_vidurl.val(), videnctype, new_loop.prop("checked"));
             if( result ) {
                 // use the api call to store the new version of the list
                 channellist.put_channel_list_to_server();
@@ -474,6 +480,8 @@ ChannelList.prototype.draw_channel_list = function() {
     channel_edit_buttons.append(new_imgurl_label);
     channel_edit_buttons.append(new_vidurl_label);
     channel_edit_buttons.append(new_videnc_mp4_label);
+    channel_edit_buttons.append(new_videnc_aud_label);
+    channel_edit_buttons.append(new_loop_label);
     channel_edit_buttons.append(this.add_entry_button);
     channel_edit_buttons.append(this.change_entry_button);
 
@@ -507,10 +515,10 @@ ChannelList.prototype.draw_channel_list = function() {
             ent_disp.append( $("<div></div>").text(entry.name));
             let video_area = $("<details></details>");
             let video_div = $('<div></div>');
-            let video_summ = $("<summary>Video Details:</summary>");
+            let video_summ = $("<summary>Media Details:</summary>");
             video_area.append(video_summ);
             video_area.append(video_div);
-            // TODO - display more
+            // TODO - display mor
             ent_disp.append(video_area);
         }
         cur_disp_pos.append(ent_disp);
@@ -532,6 +540,13 @@ ChannelList.prototype.set_selection = function (entry, domelem) {
     $(".selected").removeClass("selected");
     domelem.classList.add("selected");
 
+    $('input[name="thingtype"][value="' + entry.type + '"]').prop("checked", true);
+    $('input[name="videnctype"][value="' + entry.videotype + '"]').prop("checked", true);
+    $("#medianame").val(entry.name);
+    $("#imageurl").val(entry.image);
+    $("#mediaurl").val(entry.videourl);
+    $("#loopmedia").prop("checked", (entry.loop === undefined) ? false : entry.loop);
+
     if( entry.type == "sublist" ) {
         this.add_entry_button.removeClass("notdisplayed");
         this.change_entry_button.removeClass("notdisplayed");
@@ -541,7 +556,7 @@ ChannelList.prototype.set_selection = function (entry, domelem) {
     }
 }
 
-ChannelList.prototype.change_vals = function(name, imgurl, vidurl, videnctype) {
+ChannelList.prototype.change_vals = function(name, imgurl, vidurl, videnctype, loop) {
     let entry = {};
     if( this.currently_selected.type == "sublist" ) {
         this.currently_selected.name = name;
@@ -551,6 +566,7 @@ ChannelList.prototype.change_vals = function(name, imgurl, vidurl, videnctype) {
         this.currently_selected.image = imgurl;
         this.currently_selected.videourl = vidurl;
         this.currently_selected.videotype = videnctype;
+        this.currently_selected.loop = loop;
     }
     return true;
 }
@@ -589,12 +605,27 @@ ChannelList.prototype.add_video = function (video_name, imgurl, vidurl, videncty
 }
 
 function validate_session_or_login_screen(head_area, draw_area, foot_area) {
-    $.ajax( "/api/v1/validate_session_fe", {
-        "method": "GET",
-    }).done( function() {
+    $.ajax( get_api_url("validate_session_fe"),
+        get_api_properties({"method": "GET"})
+    ).done( function() {
         // Do nothing - we're still valid
     }).fail( function() {
         let login_screen = new LoginScreen();
         login_screen.draw(head_area, draw_area, foot_area);
     });
+}
+
+function get_api_url(tail) {
+    const API_ROOT = "http://localhost:3031/api/v1/";
+
+    return API_ROOT + tail;
+}
+
+function get_api_properties(addtl) {
+    return Object.assign({
+        "crossDomain": true,
+        "xhrFields": {
+            "withCredentials": true,
+        },
+    }, addtl);
 }

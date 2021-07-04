@@ -1,0 +1,103 @@
+fn get_env_param(param_name: &str, default_val: Option<&str>) -> String {
+    let param_file_name = format!("{}_FILE", param_name.clone());
+
+    match std::env::var(param_name) {
+        Ok(val) => val,
+        Err(_) => match std::env::var(param_file_name.clone()) {
+            Ok(filename) => match std::fs::read_to_string(filename.clone()) {
+                Ok(val) => val.trim().to_string(),
+                Err(err) => panic!("Error reading {} file {}: {:?}", 
+                    param_file_name, filename, err),
+            }
+            Err(_) => match default_val {
+                Some(val) => val.to_string(),
+                None => panic!("Value must be specified for env var {}", param_name),
+            }
+        }
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    use lettre::transport::smtp::{authentication, client};
+    use lettre::message::MultiPart;
+    use lettre::AsyncTransport;
+    
+    let smtp_server = get_env_param("SMTP_SERVER", Some("localhost"));
+    let smtp_username = get_env_param("SMTP_USERNAME", Some("webmaster"));
+    let smtp_password = get_env_param("SMTP_PASSWORD", Some(""));
+    let email_from = get_env_param("EMAIL_FROM_ADDR", Some("webmaster@localhost"));
+
+    let frontend_loc = "http://localhost.com";
+
+    let from_addr = match email_from.parse() {
+        Ok(addr) => addr,
+        Err(err) => panic!("Failed to parse email addr {} - {}",
+            email_from, err),
+    };
+
+    let base_reg_msg = lettre::Message::builder()
+        .from(from_addr)
+        .subject("Running Stream: Verify Your Account");
+
+    let creds = authentication::Credentials::
+        new(smtp_username.to_string(), smtp_password.to_string());
+
+    let tls_params = match client::TlsParameters::
+        new(smtp_server.to_string())
+    {
+        Ok(params) => params,
+        Err(err) => panic!("Failed building tls params: {}", err),
+    };
+
+    let smtp = match lettre::AsyncSmtpTransport::<lettre::Tokio1Executor>::relay(&smtp_server) {
+        Ok(builder) => builder
+            .credentials(creds)
+            .tls(client::Tls::Required(tls_params))
+            .port(25)
+            .build(),
+        Err(err) => panic!("Failed building smtp: {}", err),
+    };
+
+    let reg_key = "NO_KEY_HERE";
+    let dest_addr = "runningstreamllc@gmail.com";
+    
+    let text_msg = format!("Welcome to Running Stream - build your own Roku channel!  Please paste the following link into your browser to complete registration {}/?val_code={} - if you did not attempt to register at Running Stream please just delete this email.", frontend_loc, reg_key);
+    let html_msg = format!("<p>Welcome to Running Stream - build your own Roku channel!</p>  <p><a href=\"{}/?val_code={}\">Please click here to complete registration</a></p>  <p>If you did not attempt to register at Running Stream please just delete this email.</p>", frontend_loc, reg_key);
+
+    let dest_addr_addr = match dest_addr.parse() {
+        Ok(addr) => addr,
+        Err(err) => {
+            println!("Failed to parse email addr {} - {}",
+                dest_addr, err);
+            return;
+        },
+    };
+
+    let msg = match base_reg_msg.clone()
+        .to(dest_addr_addr)
+        .multipart(MultiPart::alternative_plain_html(
+            text_msg,
+            html_msg,
+        ))
+    {
+        Ok(val) => val,
+        Err(err) => {
+            println!("Failed to build message: {:?}", err);
+            return;
+        },
+    };
+
+    let smtp = smtp.clone();
+
+    match smtp.send(msg).await {
+        Ok(_) => {
+            println!("Registration email sent successfully");
+            return;
+        },
+        Err(e) => {
+            println!("Error sending registration email: {:?}", e);
+            return;
+        },
+    };
+}

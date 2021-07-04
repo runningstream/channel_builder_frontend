@@ -52,7 +52,12 @@ body {
   width: 100%;
   left: 0px;
   top: 0px;
-  background-color: #e7e8d1;
+  background-color: #b85042;
+}
+
+#header_area div {
+  display: flex;
+  flex-direction: row-reverse;
 }
 
 #screen_area {
@@ -79,6 +84,20 @@ input[type=button] {
   background-color: #b85042;
   border: 1px #e7e8d1 solid;
   border-radius: 5px;
+}
+
+#profile_button, #logout_button {
+  background-size: cover;
+  height: 2em;
+  width: 2em;
+}
+
+#profile_button {
+  background-image: url("img/user_profile.svg");
+}
+
+#logout_button {
+  background-image: url("img/logout.svg");
 }
 
 @media (max-width: 700px) {
