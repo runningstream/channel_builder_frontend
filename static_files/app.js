@@ -5,12 +5,20 @@ function main() {
     const SCREEN_AREA = $("#screen_area");
     const FOOT_AREA = $("#footer_area");
 
-    // See if this is a registration request
     const urlParams = new URLSearchParams(window.location.search);
+
+    // See if this is a registration request
     const val_code = urlParams.get("val_code");
     if( val_code !== null ) {
         let val_screen = new ValidationScreen();
         val_screen.draw(HEAD_AREA, SCREEN_AREA, FOOT_AREA);
+        return;
+    }
+
+    // See if this is the signup page
+    if( urlParams.get("signup") != null ) {
+        let reg_screen = new RegisterScreen();
+        reg_screen.draw(HEAD_AREA, SCREEN_AREA, FOOT_AREA);
         return;
     }
 
@@ -32,12 +40,16 @@ function UIScreen() {
     
 }
 
-UIScreen.prototype.draw = function (head_area, draw_area, foot_area) {
-    let content = $("You drew the parent UIScreen - you should never see this.");
+UIScreen.prototype.clear = function (head_area, draw_area, foot_area) {
+    $("body")[0].className = "";
     head_area.empty();
     foot_area.empty();
     draw_area.empty();
-    draw_area.append(content);
+}
+
+UIScreen.prototype.draw = function (head_area, draw_area, foot_area) {
+    this.clear(head_area, draw_area, foot_area);
+    draw_area.append($("You drew the UIScreen.  That should never happen."));
 }
 
 function LoginScreen() {
@@ -52,11 +64,67 @@ Object.defineProperty(LoginScreen.prototype, 'constructor', {
 });
 
 LoginScreen.prototype.draw = function (head_area, draw_area, foot_area) {
-    let content = $( '<form>' +
+    this.clear(head_area, draw_area, foot_area);
+    $("body").addClass("login_page");
+
+    let intro_section = $( 
+        '<section id="login_intro">' +
+        '</section>'
+    );
+    let intro_text = $( 
+        '<div id="login_intro_text">' +
+        '<h1>Running Stream</h1>' +
+        '<h2>Your Personal Roku Channel</h2>' +
+        '<br/>' +
+        '<a href="/?signup=" class="input_button">Sign Up</a>' +
+        '</div>'
+    );
+    let usecases_section = $(
+        '<section id="login_usecases">' +
+        '<h1>Why?</h1>' +
+        '<div class="usecase">' +
+        '<img src="img/videotape.svg" />' +
+        '<p>Home videos on demand</p>' +
+        '</div>' +
+        '<div class="usecase">' +
+        '<img src="img/musicparty.svg" />' +
+        '<p>Stream your party mix!</p>' +
+        '</div>' +
+        '<div class="usecase">' +
+        '<img src="img/baby.svg" />' +
+        '<p>Build a channel just for your child</p>' +
+        '</div>' +
+        '<div class="usecase">' +
+        '<img src="img/mortarboard.svg" />' +
+        '<p>Put a graduate compilation on loop</p>' +
+        '</div>' +
+        '<div class="usecase">' +
+        '<img src="img/shop.svg" />' +
+        "<p>Loop your shop's promo video</p>" +
+        '</div>' +
+        '</section>'
+    );
+    let trailer_section = $(
+        '<section id="login_trailer">' +
+        '<h2>Free.  No catch.</h2>' +
+        '<p><a href="https://github.com/runningstream/channel_builder">Source Code Here</a></p>' +
+        "<p>Why?  We're nerds and we use this ourselves.  It doesn't cost us much to let others in too.</p>" +
+        '</section>'
+    );
+    let login_section = $(
+        '<section id="login_login">' +
+        '</section>'
+    );
+    let login_form = $(
+        '<form>' +
+        '<div>' +
         '<label for="login_username">Username:</label>' +
         '<input type="text" id="login_username" autocomplete="username">' +
+        '</div>' +
+        '<div>' +
         '<label for="login_password">Password:</label>' +
         '<input type="password" id="login_password" autocomplete="current-password">' +
+        '</div>' +
         '</form>' );
     let login_button = $( '<input type="button" value="Login">' )
         .click(function() { 
@@ -74,19 +142,22 @@ LoginScreen.prototype.draw = function (head_area, draw_area, foot_area) {
                 // TODO determine reason for failure and take action
             });
         });
-    let register_button = $( '<input type="button" value="Register">' )
-        .click(function() {
-            let reg_screen = new RegisterScreen();
-            reg_screen.draw(head_area, draw_area, foot_area);
-        });
+    let register_button = $(
+        '<a href="/?signup=" class="input_button">Register</a>'
+        );
 
-    content.append(login_button);
-    content.append(register_button);
+    let button_div = $('<div></div>');
+    button_div.append(login_button);
+    button_div.append(register_button);
+    login_form.append(button_div);
+    intro_section.append(intro_text);
+    login_section.append(login_form);
 
-    head_area.empty();
-    foot_area.empty();
-    draw_area.empty();
-    draw_area.append(content);
+    draw_area.append(intro_section);
+    draw_area.append(login_section);
+    console.log(usecases_section);
+    draw_area.append(usecases_section);
+    draw_area.append(trailer_section);
 }
 
 function RegisterScreen() {
@@ -101,16 +172,40 @@ Object.defineProperty(RegisterScreen.prototype, 'constructor', {
 });
 
 RegisterScreen.prototype.draw = function (head_area, draw_area, foot_area) {
-    let content = $( '<form>' +
+    this.clear(head_area, draw_area, foot_area);
+    $("body").addClass("register_page");
+
+    let intro_content = $( 
+        '<section>' +
+        '<h1>Sign up now!</h1>' +
+        '</section>'
+    );
+    let trailer_section = $(
+        '<section>' +
+        '<p>Privacy policy: we will never give anyone else your information.  You will only ever receive a signup confirmation email from us.</p>' +
+        '</section>'
+    );
+    let register_form = $( 
+        '<form>' +
+        '<div>' +
         '<label for="reg_username">Email Address:</label>' +
         '<input type="text" id="reg_username" autocomplete="username">' +
+        '</div>' +
+        '<div>' +
         '<label for="reg_password">Password:</label>' +
         '<input type="password" id="reg_password" autocomplete="current-password">' +
+        '</div>' +
+        '<div>' +
         '<label for="verify_password">Verify Password:</label>' +
         '<input type="password" id="verify_password" autocomplete="current-password">' +
+        '</div>' +
         '</form>'
     );
-    let login_button = $( '<input type="button" value="Register">' )
+    let register_section = $(
+        '<section>' +
+        '</section>'
+    );
+    let register_button = $( '<input type="button" value="Register">' )
         .click(function() { 
             if( $("#reg_password").val() != $("#verify_password").val() ) {
                 // TODO make this nicer
@@ -132,12 +227,12 @@ RegisterScreen.prototype.draw = function (head_area, draw_area, foot_area) {
                 // TODO determine reason for failure and take action
             });
         });
-    content.append(login_button);
+    register_form.append(register_button);
+    register_section.append(register_form)
 
-    head_area.empty();
-    foot_area.empty();
-    draw_area.empty();
-    draw_area.append(content);
+    draw_area.append(intro_content);
+    draw_area.append(register_section);
+    draw_area.append(trailer_section);
 }
 
 function ValidationScreen() {
@@ -616,7 +711,8 @@ function validate_session_or_login_screen(head_area, draw_area, foot_area) {
 }
 
 function get_api_url(tail) {
-    const API_ROOT = "http://localhost:3031/api/v1/";
+    //const API_ROOT = "http://localhost:3031/api/v1/";
+    const API_ROOT = "http://192.168.7.31:3031/api/v1/";
 
     return API_ROOT + tail;
 }

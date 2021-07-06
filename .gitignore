@@ -4,3 +4,6 @@
 *.secret
 Cargo.lock
 dev_diesel_env
+node_modules/
+package-lock.json
+package.json

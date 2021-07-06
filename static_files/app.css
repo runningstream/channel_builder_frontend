@@ -1,6 +1,48 @@
 body {
   background: #e7e8d1;
   color: #8f1014;
+  margin: 0px;
+  padding: 0px;
+  width: 100%;
+}
+
+h1 {
+  font-size: 5em;
+}
+
+h2 {
+  font-size: 2em;
+}
+
+input[type=button], .input_button {
+  background-color: #b85042;
+  border: 1px #e7e8d1 solid;
+  border-radius: 20px;
+  color: #e7e8d1;
+  margin: 5px;
+  font-family: sans-serif;
+  text-decoration: none;
+  text-shadow: none;
+}
+input[type=button]:hover, .input_button:hover {
+  cursor: pointer;
+}
+input[type=button]:active, .input_button:active {
+  box-shadow: inset 5px 5px #8f1014;
+}
+
+input[type=text],
+input[type=password] {
+  background-color: #e7e8d1;
+  border: 1px #b85042 solid;
+  border-radius: 10px;
+  color: #8f1014;
+  padding: 5px;
+  margin: 5px;
+}
+
+section {
+  text-align: center;
 }
 
 .notdisplayed {
@@ -15,7 +57,7 @@ body {
   display: flex;
   flex-direction: row-reverse;
   border-width: 1px;
-  border-radius: 5px;
+  border-radius: 20px;
   padding: 8px;
 }
 
@@ -42,8 +84,8 @@ body {
 
 .sel_list_ent {
   border: 1px #e7e8d1 solid;
-  border-radius: 5px;
-  padding: 5px;
+  border-radius: 20px;
+  padding: 20px;
 }
 
 #header_area {
@@ -53,6 +95,7 @@ body {
   left: 0px;
   top: 0px;
   background-color: #b85042;
+  z-index: 1;
 }
 
 #header_area div {
@@ -80,12 +123,6 @@ body {
   background-color: #e7e8d1;
 }
 
-input[type=button] {
-  background-color: #b85042;
-  border: 1px #e7e8d1 solid;
-  border-radius: 5px;
-}
-
 #profile_button, #logout_button {
   background-size: cover;
   height: 2em;
@@ -101,6 +138,14 @@ input[type=button] {
 }
 
 @media (max-width: 700px) {
+  h1 {
+    font-size: 3em;
+  }
+
+  h2 {
+    font-size: 1.5em;
+  }
+
   #content {
     display: block;
   }
@@ -113,6 +158,83 @@ input[type=button] {
   #chan_list {
     width: 100%;
   }
+}
+.register_page input[type=button], .register_page .input_button, .login_page #login_login input[type=button], .login_page #login_login .input_button, .login_page #login_intro input[type=button], .login_page #login_intro .input_button {
+  font-weight: 700;
+  font-size: 1em;
+  padding: 10px 15px;
+}
+
+.login_page #login_intro {
+  position: relative;
+  width: 100%;
+  min-height: auto;
+}
+.login_page #login_intro:before, .login_page #login_intro:after {
+  content: "";
+  position: absolute;
+  top: 0px;
+  left: 0px;
+  width: 100%;
+  height: 100%;
+}
+.login_page #login_intro:before {
+  z-index: -2;
+  background-color: black;
+}
+.login_page #login_intro:after {
+  z-index: -1;
+  background-image: url(img/salzburg.jpg);
+  background-position: center;
+  background-size: cover;
+  filter: blur(2px);
+}
+.login_page #login_intro_text {
+  padding: 100px 15px;
+  color: #e7e8d1;
+  text-shadow: 10px 0px 20px black, -10px 0px 20px black;
+}
+.login_page #login_intro input[type=button], .login_page #login_intro .input_button {
+  text-transform: uppercase;
+  padding: 15px 30px;
+  display: inline-block;
+  transition-duration: 0.25s;
+}
+.login_page #login_intro input[type=button]:hover, .login_page #login_intro .input_button:hover {
+  transform: scale3d(1.1, 1.1, 1.1);
+  transition-duration: 0.25s;
+}
+.login_page #login_login {
+  padding: 75px 25px;
+}
+.login_page #login_login div {
+  padding: 1em;
+}
+.login_page #login_usecases {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  background-color: #b85042;
+  color: #e7e8d1;
+  padding: 75px 25px;
+}
+.login_page #login_usecases h1 {
+  width: 100%;
+  margin: 0 0 50px 0;
+}
+.login_page #login_usecases .usecase {
+  width: 150px;
+  margin: 20px;
+}
+.login_page #login_usecases .usecase p {
+  margin: 0;
+}
+.login_page #login_usecases .usecase img {
+  width: 100%;
+  filter: invert(86%) sepia(28%) saturate(126%) hue-rotate(23deg) brightness(109%) contrast(82%);
+}
+.login_page #login_trailer {
+  padding: 100px 25px;
 }
 
 /*# sourceMappingURL=app.css.map */

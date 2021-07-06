@@ -6,17 +6,62 @@ $ltteal: #dbeee1;
 
 $footer_height: 2em;
 $header_height: 2em;
-$border_radius: 5px;
+$border_radius: 20px;
 
 body {
     background: $ltolive;
     color: $dkscarlet;
+    margin: 0px;
+    padding: 0px;
+    width: 100%;
 }
 
 div {
     //border: 1px solid black;
     //padding: 2px;
     //margin: 2px;
+}
+
+h1 {
+    font-size: 5em;
+}
+
+h2 {
+    font-size: 2em;
+}
+
+input[type="button"], .input_button {
+    background-color: $scarlet;
+    border: 1px $ltolive solid;
+    border-radius: $border_radius;
+    color: $ltolive;
+    margin: 5px;
+    font-family: sans-serif;
+    text-decoration: none;
+    text-shadow: none;
+
+    &:hover {
+        cursor: pointer;
+    }
+
+    &:active {
+        box-shadow: inset 5px 5px $dkscarlet;
+    }
+}
+
+input[type="text"],
+input[type="password"]
+{
+    background-color: $ltolive;
+    border: 1px $scarlet solid;
+    border-radius: $border_radius * .5;
+    color: $dkscarlet;
+    padding: 5px;
+    margin: 5px;
+}
+
+section {
+    text-align: center;
 }
 
 .notdisplayed {
@@ -74,8 +119,8 @@ div {
     width: 100%;
     left: 0px;
     top: 0px;
-
     background-color: $scarlet;
+    z-index: 1;
 }
 
 #header_area div {
@@ -104,12 +149,6 @@ div {
     background-color: $ltolive;
 }
 
-input[type="button"] {
-    background-color: $scarlet;
-    border: 1px $ltolive solid;
-    border-radius: $border_radius;
-}
-
 #profile_button, #logout_button {
     background-size: cover;
     height: 2em;
@@ -124,6 +163,14 @@ input[type="button"] {
 }
 
 @media (max-width: 700px) {
+    h1 {
+        font-size: 3em;
+    }
+
+    h2 {
+        font-size: 1.5em;
+    }
+
     #content {
         display: block;
     }
@@ -137,4 +184,111 @@ input[type="button"] {
         width: 100%;
     }
 
+}
+
+%bigger_text {
+    font-weight: 700;
+    font-size: 1em;
+    padding: 10px 15px;
+}
+
+.login_page {
+    #login_intro {
+        position: relative;
+        width: 100%;
+        min-height: auto;
+
+        &:before, &:after {
+            content: "";
+            position: absolute;
+            top: 0px;
+            left: 0px;
+            width: 100%;
+            height: 100%;
+        }
+
+        &:before {
+            z-index: -2;
+            background-color: black;
+        }
+
+        &:after {
+            z-index: -1;
+            background-image: url(img/salzburg.jpg);
+            background-position: center;
+            background-size: cover;
+            filter: blur(2px);
+        }
+
+        &_text {
+            padding: 100px 15px;
+            color: $ltolive;
+            text-shadow: 10px 0px 20px black, -10px 0px 20px black;
+        }
+
+        input[type=button], .input_button
+        {
+            @extend %bigger_text;
+            text-transform: uppercase;
+            padding: 15px 30px;
+            display: inline-block;
+
+            transition-duration: .25s;
+            &:hover {
+                transform: scale3d(1.1, 1.1, 1.1);
+                transition-duration: .25s;
+            }
+        }
+    }
+
+    #login_login {
+        padding: 75px 25px;
+
+        div {
+            padding: 1em;
+        }
+
+        input[type=button], .input_button
+        {
+            @extend %bigger_text;
+        }
+    }
+
+    #login_usecases {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        background-color: $scarlet;
+        color: $ltolive;
+        padding: 75px 25px;
+
+        h1 {
+            width: 100%;
+            margin: 0 0 50px 0;
+        }
+
+        .usecase {
+            width: 150px;
+            margin: 20px;
+
+            p {
+                margin: 0;
+            }
+
+            img {
+                width: 100%;
+                filter: invert(86%) sepia(28%) saturate(126%) hue-rotate(23deg) brightness(109%) contrast(82%);
+            }
+        }
+    }
+
+    #login_trailer {
+        padding: 100px 25px;
+    }
+}
+
+.register_page {
+    input[type=button], .input_button {
+        @extend %bigger_text;
+    }
 }
