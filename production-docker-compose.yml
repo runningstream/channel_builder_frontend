@@ -14,9 +14,11 @@ secrets:
         file: ./email_from.secret
 volumes:
     db_data:
+    nginx_secrets:
 services:
     db:
         image: postgres
+        restart: always
         environment:
             POSTGRES_PASSWORD_FILE: /run/secrets/db_password
         volumes:
@@ -30,11 +32,12 @@ services:
             - db_password
     channel_builder:
         build: .
+        restart: always
         environment:
             POSTGRES_PASSWORD_FILE: /run/secrets/db_password
             POSTGRES_HOST: "db:5432"
             CB_LISTEN: "0.0.0.0:3031"
-            FRONTEND_LOC: "http://192.168.7.31:8080"
+            FRONTEND_LOC: "https://runningstream.cc"
             SMTP_SERVER_FILE: /run/secrets/smtp_server
             SMTP_PORT_FILE: /run/secrets/smtp_port
             SMTP_USERNAME_FILE: /run/secrets/smtp_username
@@ -51,8 +54,16 @@ services:
             - smtp_password
             - email_from
     web:
-        image: nginx
+        image: jonasal/nginx-certbot:latest
+        restart: always
         volumes:
-            - ./static_files:/usr/share/nginx/html:ro
+            - nginx_secrets:/etc/letsencrypt
+            - ./nginx_user_conf.d:/etc/nginx/user_conf.d
+        environment:
+            CERTBOT_EMAIL: runningstreamllc@gmail.com
+            STAGING: 0
+            USE_ECDSA: 1
+            DEBUG: 1
         ports:
-            - 8080:80
+            - 80:80
+            - 443:443
