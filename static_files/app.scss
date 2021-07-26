@@ -24,13 +24,28 @@ div {
 
 h1 {
     font-size: 5em;
+    font-weight: bold;
 }
 
 h2 {
     font-size: 2em;
+    font-weight: bold;
 }
 
-input[type="button"], .input_button {
+h3 {
+    font-size: 1.5em;
+    font-weight: bold;
+}
+
+a {
+    color: inherit;
+}
+
+a:hover {
+    text-shadow: 0px 0px 1px currentcolor;
+}
+
+input[type=submit], input[type=button], .input_button {
     background-color: $scarlet;
     border: 1px $ltolive solid;
     border-radius: $border_radius;
@@ -58,6 +73,7 @@ input[type="password"]
     color: $dkscarlet;
     padding: 5px;
     margin: 5px;
+    max-width: 100%;
 }
 
 section {
@@ -68,64 +84,14 @@ section {
     display: none;
 }
 
-.sel_list_ent.selected {
-    border: 1px solid $scarlet;
+.block_labels > label {
+    display: block;
 }
 
-#content {
-    display: flex;
-    flex-direction: row-reverse;
-    border-width: 1px;
-    border-radius: $border_radius;
-    padding: 8px;
-}
-
-#chan_list {
-    width: 20%;
-}
-
-#chan_edit {
-    width: 80%;
-    margin-right: 5px;
-}
-
-#chan_list, #chan_edit {
-    margin-bottom: 5px;
-}
-
-.sel_list_ent:nth-child(odd) {
-    background: $teal;
-}
-
-.sel_list_ent:nth-child(even) {
-    background: $ltolive;
-}
-
-.sel_list_ent > details > div, #content > div {
-    //border: 1px $ltolive solid;
-    //border-radius: 5px;
-    //padding: 5px;
-}
-
-.sel_list_ent {
-    border: 1px $ltolive solid;
-    border-radius: $border_radius;
-    padding: $border_radius;
-}
-
-#header_area {
-    position: fixed;
-    height: $header_height;
-    width: 100%;
-    left: 0px;
-    top: 0px;
-    background-color: $scarlet;
-    z-index: 1;
-}
-
-#header_area div {
-    display: flex;
-    flex-direction: row-reverse;
+%bigger_text {
+    font-weight: 700;
+    font-size: 1em;
+    padding: 10px 15px;
 }
 
 #screen_area {
@@ -149,47 +115,120 @@ section {
     background-color: $ltolive;
 }
 
-#profile_button, #logout_button {
-    background-size: cover;
-    height: 2em;
-    width: 2em;
-}
-#profile_button {
-    background-image: url("img/user_profile.svg");
-}
+#popup_back {
+    position: fixed;
+    z-index: 100;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba($dkscarlet, .2);
+    backdrop-filter: blur(2px);
 
-#logout_button {
-    background-image: url("img/logout.svg");
-}
-
-@media (max-width: 700px) {
-    h1 {
-        font-size: 3em;
+    #popup_box {
+        width: fit-content;
+        position: relative;
+        padding: 2em;
+        margin: 4em auto;
+        background-color: $ltolive;
+        border-radius: $border_radius;
     }
 
-    h2 {
-        font-size: 1.5em;
+    #popup_area {
+        text-align: center;
+    }
+
+    .close_button {
+        top: .4em;
+        right: .4em;
+        position: absolute;
+        font-family: sans-serif;
+        cursor: pointer;
+    }
+}
+
+.mainscreen_page {
+    .sel_list_ent.selected {
+        border: 1px solid $scarlet;
     }
 
     #content {
-        display: block;
+        display: flex;
+        flex-direction: row-reverse;
+        border-width: 1px;
+        border-radius: $border_radius;
+        padding: 8px;
     }
 
-    #chan_edit {
-        width: 100%;
-        margin-right: 0px;
+    #chan_list_list::after {
+        display: block;
+        border-bottom: 1px solid $scarlet;
+        width: 50%;
+        margin: 10px auto;
+        content: "";
     }
 
     #chan_list {
-        width: 100%;
+        width: 20%;
+        text-align: center;
     }
 
+    #chan_edit {
+        width: 80%;
+        margin-right: 5px;
+    }
+
+    #chan_list, #chan_edit {
+        margin-bottom: 5px;
+    }
+
+    .sel_list_ent:nth-child(odd) {
+        background: $teal;
+    }
+
+    .sel_list_ent:nth-child(even) {
+        background: $ltolive;
+    }
+
+    .sel_list_ent > details > div, #content > div {
+        //border: 1px $ltolive solid;
+        //border-radius: 5px;
+        //padding: 5px;
+    }
+
+    .sel_list_ent {
+        border: 1px $ltolive solid;
+        border-radius: $border_radius;
+        padding: $border_radius;
+    }
 }
 
-%bigger_text {
-    font-weight: 700;
-    font-size: 1em;
-    padding: 10px 15px;
+#header_area {
+    position: fixed;
+    height: $header_height;
+    width: 100%;
+    left: 0px;
+    top: 0px;
+    background-color: $scarlet;
+    z-index: 1;
+
+    & div {
+        display: flex;
+        flex-direction: row-reverse;
+    }
+
+    #profile_button, #logout_button {
+        background-size: cover;
+        height: 2em;
+        width: 2em;
+    }
+    #profile_button {
+        background-image: url("img/user_profile.svg");
+    }
+
+    #logout_button {
+        background-image: url("img/logout.svg");
+    }
 }
 
 .login_page {
@@ -226,7 +265,7 @@ section {
             text-shadow: 10px 0px 20px black, -10px 0px 20px black;
         }
 
-        input[type=button], .input_button
+        input[type=submit], input[type=button], .input_button
         {
             @extend %bigger_text;
             text-transform: uppercase;
@@ -241,14 +280,21 @@ section {
         }
     }
 
-    #login_login {
-        padding: 75px 25px;
+    #login_login, #login_trailer, #login_usecases, #login_docs {
+        padding: 100px 25px;
+    }
 
+    #login_usecases, #login_docs {
+        background-color: $scarlet;
+        color: $ltolive;
+    }
+
+    #login_login {
         div {
             padding: 1em;
         }
 
-        input[type=button], .input_button
+        input[type=submit], input[type=button], .input_button
         {
             @extend %bigger_text;
         }
@@ -258,9 +304,6 @@ section {
         display: flex;
         flex-wrap: wrap;
         justify-content: center;
-        background-color: $scarlet;
-        color: $ltolive;
-        padding: 75px 25px;
 
         h1 {
             width: 100%;
@@ -281,14 +324,53 @@ section {
             }
         }
     }
+}
 
-    #login_trailer {
-        padding: 100px 25px;
+.register_page, {
+    input[type=submit], input[type=button], .input_button {
+        @extend %bigger_text;
     }
 }
 
-.register_page {
-    input[type=button], .input_button {
+.validation_page {
+    input[type=submit], input[type=button], .input_button {
         @extend %bigger_text;
+    }
+
+    #screen_area {
+        text-align: center;
+    }
+}
+
+@media (max-width: 700px) {
+    h1 {
+        font-size: 3em;
+    }
+
+    h2 {
+        font-size: 1.5em;
+    }
+
+    .mainscreen_page {
+        #content {
+            display: block;
+
+            #chan_list::after {
+                display: block;
+                border-bottom: 1px solid $scarlet;
+                width: 50%;
+                margin: auto;
+                content: "";
+            }
+        }
+
+        #chan_edit {
+            width: 100%;
+            margin-right: 0px;
+        }
+
+        #chan_list {
+            width: 100%;
+        }
     }
 }

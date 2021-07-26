@@ -1,9 +1,14 @@
 $(document).ready(main);
 
 function main() {
-    const HEAD_AREA = $("#header_area");
-    const SCREEN_AREA = $("#screen_area");
-    const FOOT_AREA = $("#footer_area");
+
+    let screen_props = {
+        head_area: $("#header_area"),
+        draw_area: $("#screen_area"),
+        foot_area: $("#footer_area"),
+        pops_back: $("#popup_back"),
+        pops_area: $("#popup_area"),
+    };
 
     const urlParams = new URLSearchParams(window.location.search);
 
@@ -11,14 +16,14 @@ function main() {
     const val_code = urlParams.get("val_code");
     if( val_code !== null ) {
         let val_screen = new ValidationScreen();
-        val_screen.draw(HEAD_AREA, SCREEN_AREA, FOOT_AREA);
+        val_screen.draw(screen_props);
         return;
     }
 
     // See if this is the signup page
     if( urlParams.get("signup") != null ) {
         let reg_screen = new RegisterScreen();
-        reg_screen.draw(HEAD_AREA, SCREEN_AREA, FOOT_AREA);
+        reg_screen.draw(screen_props);
         return;
     }
 
@@ -28,11 +33,11 @@ function main() {
     ).done( function() {
         // Display the main screen
         let main_screen = new MainScreen();
-        main_screen.draw(HEAD_AREA, SCREEN_AREA, FOOT_AREA);
+        main_screen.draw(screen_props);
     }).fail( function() {
         // Display the login screen
         let login_screen = new LoginScreen();
-        login_screen.draw(HEAD_AREA, SCREEN_AREA, FOOT_AREA);
+        login_screen.draw(screen_props);
     });
 }
 
@@ -40,15 +45,16 @@ function UIScreen() {
     
 }
 
-UIScreen.prototype.clear = function (head_area, draw_area, foot_area) {
+UIScreen.prototype.clear = function (screen_props) {
     $("body")[0].className = "";
-    head_area.empty();
-    foot_area.empty();
-    draw_area.empty();
+    screen_props.head_area.empty();
+    screen_props.foot_area.empty();
+    screen_props.draw_area.empty();
+    screen_props.pops_area.empty();
 }
 
-UIScreen.prototype.draw = function (head_area, draw_area, foot_area) {
-    this.clear(head_area, draw_area, foot_area);
+UIScreen.prototype.draw = function (screen_props) {
+    this.clear(screen_props);
     draw_area.append($("You drew the UIScreen.  That should never happen."));
 }
 
@@ -63,8 +69,8 @@ Object.defineProperty(LoginScreen.prototype, 'constructor', {
     writable: true 
 });
 
-LoginScreen.prototype.draw = function (head_area, draw_area, foot_area) {
-    this.clear(head_area, draw_area, foot_area);
+LoginScreen.prototype.draw = function (screen_props) {
+    this.clear(screen_props);
     $("body").addClass("login_page");
 
     let intro_section = $( 
@@ -107,8 +113,14 @@ LoginScreen.prototype.draw = function (head_area, draw_area, foot_area) {
     let trailer_section = $(
         '<section id="login_trailer">' +
         '<h2>Free.  No catch.</h2>' +
-        '<p><a href="https://github.com/runningstream/channel_builder">Source Code Here</a></p>' +
+        '<h3><a href="https://github.com/runningstream/channel_builder">Source Code Here</a></h3>' +
         "<p>Why?  We're nerds and we use this ourselves.  It doesn't cost us much to let others in too.</p>" +
+        '</section>'
+    );
+    let docs_section = $(
+        '<section id="login_docs">' +
+        '<h2>Documentation</h2>' +
+        '<h3><a href="https://docs.runningstream.cc/">Getting Started</a></h3>' +
         '</section>'
     );
     let login_section = $(
@@ -125,9 +137,8 @@ LoginScreen.prototype.draw = function (head_area, draw_area, foot_area) {
         '<label for="login_password">Password:</label>' +
         '<input type="password" id="login_password" autocomplete="current-password">' +
         '</div>' +
-        '</form>' );
-    let login_button = $( '<input type="button" value="Login">' )
-        .click(function() { 
+        '</form>' )
+        .submit(function() {
             let login_dat = {
                 "username": $("#login_username").val(),
                 "password": $("#login_password").val(),
@@ -137,11 +148,15 @@ LoginScreen.prototype.draw = function (head_area, draw_area, foot_area) {
             ).done(function() {
                 // TODO determine if we now have a session id, and if so, jump to the next part, otherwise display failure
                 let main_screen = new MainScreen();
-                main_screen.draw(head_area, draw_area, foot_area);
-            }).fail(function() {
-                // TODO determine reason for failure and take action
+                main_screen.draw(screen_props);
+            }).fail(function(jqXHR, text_status, asdf) {
+                display_popup(screen_props, "Login Failed");
             });
+
+            // Return false to cancel the submit action
+            return false;
         });
+    let login_button = $( '<input type="submit" value="Login">' );
     let register_button = $(
         '<a href="/?signup=" class="input_button">Register</a>'
         );
@@ -153,11 +168,12 @@ LoginScreen.prototype.draw = function (head_area, draw_area, foot_area) {
     intro_section.append(intro_text);
     login_section.append(login_form);
 
-    draw_area.append(intro_section);
-    draw_area.append(login_section);
+    screen_props.draw_area.append(intro_section);
+    screen_props.draw_area.append(login_section);
     console.log(usecases_section);
-    draw_area.append(usecases_section);
-    draw_area.append(trailer_section);
+    screen_props.draw_area.append(usecases_section);
+    screen_props.draw_area.append(trailer_section);
+    screen_props.draw_area.append(docs_section);
 }
 
 function RegisterScreen() {
@@ -171,8 +187,8 @@ Object.defineProperty(RegisterScreen.prototype, 'constructor', {
     writable: true 
 });
 
-RegisterScreen.prototype.draw = function (head_area, draw_area, foot_area) {
-    this.clear(head_area, draw_area, foot_area);
+RegisterScreen.prototype.draw = function (screen_props) {
+    this.clear(screen_props);
     $("body").addClass("register_page");
 
     let intro_content = $( 
@@ -200,17 +216,11 @@ RegisterScreen.prototype.draw = function (head_area, draw_area, foot_area) {
         '<input type="password" id="verify_password" autocomplete="current-password">' +
         '</div>' +
         '</form>'
-    );
-    let register_section = $(
-        '<section>' +
-        '</section>'
-    );
-    let register_button = $( '<input type="button" value="Register">' )
-        .click(function() { 
+    )
+        .submit(function() { 
             if( $("#reg_password").val() != $("#verify_password").val() ) {
-                // TODO make this nicer
-                alert("Passwords do not match!");
-                return;
+                display_popup(screen_props, "Passwords do not match!");
+                return false;
             }
             let reg_dat = {
                 "username": $("#reg_username").val(),
@@ -220,19 +230,31 @@ RegisterScreen.prototype.draw = function (head_area, draw_area, foot_area) {
                 get_api_properties({"method": "POST", "data": reg_dat})
             ).done(function() {
                 // TODO determine whether it was successful and display a message
-                alert("User account requested, look for an email...");
-                let login_screen = new LoginScreen();
-                login_screen.draw(head_area, draw_area, foot_area);
+                display_popup(screen_props,
+                    "User account requested, look for an email...",
+                    function() {
+                        let login_screen = new LoginScreen();
+                        login_screen.draw(screen_props);
+                    }
+                );
             }).fail(function() {
                 // TODO determine reason for failure and take action
+                display_popup(screen_props,
+                    "User account creation failed!");
             });
+            return false;
         });
+    let register_section = $(
+        '<section>' +
+        '</section>'
+    );
+    let register_button = $( '<input type="submit" value="Register">' );
     register_form.append(register_button);
     register_section.append(register_form)
 
-    draw_area.append(intro_content);
-    draw_area.append(register_section);
-    draw_area.append(trailer_section);
+    screen_props.draw_area.append(intro_content);
+    screen_props.draw_area.append(register_section);
+    screen_props.draw_area.append(trailer_section);
 }
 
 function ValidationScreen() {
@@ -246,42 +268,47 @@ Object.defineProperty(ValidationScreen.prototype, 'constructor', {
     writable: true 
 });
 
-ValidationScreen.prototype.draw = function (head_area, draw_area, foot_area) {
-    let content = $( '<form>' +
-        '</form>'
+ValidationScreen.prototype.draw = function (screen_props) {
+    this.clear(screen_props);
+    $("body").addClass("validation_page");
+
+    let val_welcome = $( '<h2>Welcome to Running Stream!</h2>' +
+        '<p>Register here!  If you didn\'t request to register, or you no longer wish to receve registration emails, just delete the one you received.  You will not receive any further communications from this service</p>'
     );
-    let validate_button = $( '<input type="button" value="Validate Account">' )
-        .click(function() {
+    let val_form = $( '<form>' +
+            '</form>')
+        .submit(function() {
             const urlParams = new URLSearchParams(window.location.search);
             const val_code = urlParams.get("val_code");
+
+            let goto_login = function () {
+                window.history.pushState("", "", "/");
+                let login_screen = new LoginScreen();
+                login_screen.draw(screen_props);
+            };
             
             $.ajax( get_api_url("validate_account?val_code="+val_code),
                 get_api_properties({"method": "GET"})
             ).done( function() {
                 // TODO determine whether it was successful and display a message
-                alert("User validation successful!  Now login."); 
-                window.history.pushState("Account Validation", "Account Validation", "/");
-                let login_screen = new LoginScreen();
-                login_screen.draw(head_area, draw_area, foot_area);
+                display_popup(screen_props, "User validation successful!  Now login.",
+                    goto_login);
             }).fail( function(jqXHR, textStatus, errorThrown) {
                 // TODO test the part below, perhaps display in a nicer way
                 if( jqXHR.status == 403 ) {
-                    alert("Invalid validation code.");
+                    display_popup(screen_props, "Invalid validation code!", goto_login); 
                 } else {
-                    alert("Validation failed.");
+                    display_popup(screen_props, "Validation failed.", goto_login); 
                 }
-                window.history.pushState("Main Screen", "Main Screen", "/");
-                let login_screen = new LoginScreen();
-                login_screen.draw(head_area, draw_area, foot_area);
             });
+            return false;
         });
+    let validate_button = $( '<input type="submit" value="Validate Account">' );
 
-    content.append(validate_button);
+    val_form.append(validate_button);
 
-    head_area.empty();
-    foot_area.empty();
-    draw_area.empty();
-    draw_area.append(content);
+    screen_props.draw_area.append(val_welcome);
+    screen_props.draw_area.append(val_form);
 }
 
 function MainScreen() {
@@ -295,13 +322,16 @@ Object.defineProperty(MainScreen.prototype, 'constructor', {
     writable: true 
 });
 
-MainScreen.prototype.draw = function (head_area, draw_area, foot_area) {
+MainScreen.prototype.draw = function (screen_props) {
+    this.clear(screen_props);
+    $("body").addClass("mainscreen_page");
+
     let content = $( '<div id="content"></div>' );
     let mgmt_button_area = $( "<div></div>" );
     let channel_list_area = $( '<div id="chan_list"></div>' );
     let channel_edit_area = $( '<div id="chan_edit"></div>' );
 
-    let channel_list_list = new ChannelListList(channel_edit_area, foot_area);
+    let channel_list_list = new ChannelListList(screen_props, channel_edit_area);
     channel_list_list.draw(channel_list_area);
 
     let validate_button = $( '<input type="button" value="Validate Session">' )
@@ -309,9 +339,9 @@ MainScreen.prototype.draw = function (head_area, draw_area, foot_area) {
             $.ajax( get_api_url("validate_session_fe"),
                 get_api_properties({"method": "GET"})
             ).done( function() {
-                alert("Session validation successful."); 
+                display_popup(screen_props, "Session validation successful."); 
             }).fail( function() {
-                alert("Fail");
+                display_popup(screen_props, "Session validation failed!"); 
             });
         });
 
@@ -321,9 +351,9 @@ MainScreen.prototype.draw = function (head_area, draw_area, foot_area) {
                 get_api_properties({"method": "GET"})
             ).done( function() {
                 let login_screen = new LoginScreen();
-                login_screen.draw(head_area, draw_area, foot_area);
+                login_screen.draw(screen_props);
             }).fail( function() {
-                validate_session_or_login_screen(head_area, draw_area, foot_area);
+                validate_session_or_login_screen(screen_props);
             });
         });
 
@@ -337,24 +367,22 @@ MainScreen.prototype.draw = function (head_area, draw_area, foot_area) {
     content.append(channel_list_area);
     content.append(channel_edit_area);
 
-    head_area.empty();
-    foot_area.empty();
-    draw_area.empty();
-    head_area.append(mgmt_button_area);
-    draw_area.append(content);
+    screen_props.head_area.append(mgmt_button_area);
+    screen_props.draw_area.append(content);
 }
 
-function ChannelListList(channel_list_edit_area, chan_list_edit_button_dest) {
+function ChannelListList(screen_props, channel_list_edit_area) {
     this.channel_list_list_area = $( "<div></div>" );
     this.channel_list_edit_area = channel_list_edit_area;
-    this.channel_list_edit_button_dest = chan_list_edit_button_dest;
+    this.channel_list_edit_button_dest = screen_props.foot_area;
     this.channel_list_list = [];
+    this.screen_props = screen_props;
     this.selected_list = null;
 
-    this.get_channel_lists_from_server();
+    this.get_channel_lists_from_server(screen_props);
 }
 
-ChannelListList.prototype.get_channel_lists_from_server = function () {
+ChannelListList.prototype.get_channel_lists_from_server = function (screen_props) {
     let channellistlist = this;
     $.ajax( get_api_url("get_channel_lists"),
         get_api_properties({"method": "GET"})
@@ -363,12 +391,11 @@ ChannelListList.prototype.get_channel_lists_from_server = function () {
         channellistlist.draw_channel_list_list();
     }).fail( function() {
         // TODO improve
-        alert("Getting channel lists failed, please refresh");
+        display_popup(screen_props, "Getting channel lists failed, please refresh");
     });
 }
 
 ChannelListList.prototype.draw = function (draw_area) {
-    console.log("qwer");
     draw_area.children().detach();
     draw_area.append(this.channel_list_list_area);
 }
@@ -376,11 +403,11 @@ ChannelListList.prototype.draw = function (draw_area) {
 ChannelListList.prototype.draw_channel_list_list = function () {
     let channel_list_list = this;
 
-    let channel_list = $( '<div></div>' );
+    let channel_list = $( '<div id="chan_list_list"></div>' );
 
     let new_channel_list_area = $( "<form>" +
         '<label for="new_channel_list_name">New Channel List Name:</label>' +
-        '<input type="textarea" id="new_channel_list_name">' +
+        '<input type="text" id="new_channel_list_name">' +
         "</form>" );
 
 
@@ -428,7 +455,8 @@ ChannelListList.prototype.draw_channel_list_list = function () {
 
     this.channel_list_list.forEach(function (channel_name) {
         let channel = $( '<div class="sel_list_ent"></div>' ).text(channel_name);
-        let channellist = new ChannelList(channel_name, chan_edit_butt_dest);
+        let channellist = new ChannelList(channel_list_list.screen_props,
+            channel_name, chan_edit_butt_dest);
         channel.click(function() {
             channellist.draw(channel_list_list.channel_list_edit_area);
             channel_list_list.set_selection(channellist, channel.get()[0]);
@@ -447,12 +475,14 @@ ChannelListList.prototype.set_selection = function(channel_list, domelem) {
     domelem.classList.add("selected");
 }
 
-function ChannelList(channel_name, chan_edit_butt_dest) {
+function ChannelList(screen_props, channel_name, chan_edit_butt_dest) {
     this.channel_name = channel_name;
     this.channel_list_button_dest = chan_edit_butt_dest;
     this.channel_list_edit_area = $("<div></div>");
     this.channel_list_button_area = $("<div></div>");
     this.channel_list = {"entries": []};
+    this.ui_only_entry_props = ["expanded"];
+    this.screen_props = screen_props;
     this.currently_selected = null;
     this.add_entry_button = null;
     this.change_entry_button = null;
@@ -481,10 +511,24 @@ ChannelList.prototype.get_channel_list_from_server = function () {
 }
 
 ChannelList.prototype.put_channel_list_to_server = function() {
+    const to_strip = this.ui_only_entry_props;
+
+    let strip_ui_specific = function(entry) {
+        let new_ent = {};
+        for( key in entry ) {
+            if( key == "entries" ) {
+                new_ent[key] = entry.entries.map( strip_ui_specific );
+            } else if( ! to_strip.includes(key) ) {
+                new_ent[key] = entry[key];
+            }
+        }
+        return new_ent;
+    };
+
     let channellist = this;
     let list_dat = {
         "listname": this.channel_name,
-        "listdata": JSON.stringify(this.channel_list),
+        "listdata": JSON.stringify(strip_ui_specific(this.channel_list)),
     };
     $.ajax( get_api_url("set_channel_list"),
         get_api_properties({"method": "POST", "data": list_dat})
@@ -496,6 +540,33 @@ ChannelList.prototype.put_channel_list_to_server = function() {
     });
 }
 
+let sublist_dialog_content = function(cur_entry=undefined) {
+    if(cur_entry === undefined) {
+        cur_entry = {"name": "", "image": ""};
+    }
+    return $( '<div class="block_labels">' +
+        '<label>Name: <input type="text" id="pop_addname" value="' + cur_entry.name + '"></label>' +
+        '<label>Image URL: <input type="text" id="pop_imageurl" value="' + cur_entry.image + '"></label>' +
+        '</div>' );
+}
+
+let media_dialog_content = function(cur_entry=undefined) {
+    if(cur_entry === undefined) {
+        cur_entry = {"name": "", "image": "", "videourl": "",
+            "videotype": "mp4", "loop": false};
+    }
+    let loop_checked = cur_entry.loop ? " checked" : "";
+    let content = $('<div class="block_labels">' +
+        '<label>Name: <input type="text" id="pop_addname" value="' + cur_entry.name + '"></label>' +
+        '<label>Image URL: <input type="text" id="pop_imageurl" value="' + cur_entry.image + '"></label>' +
+        '<label>Media URL: <input type="text" id="pop_videourl" value="' + cur_entry.videourl + '"></label>' +
+        '<label>Loop Media: <input type="checkbox" id="pop_loopmedia"' + loop_checked + '></label>' +
+        '<label>MP4 <input type="radio" value="mp4" name="pop_videnctype"></label>' +
+        '<label>Audio <input type="radio" value="audio" name="pop_videnctype"></label>' +
+        '</div>' );
+    content.find('input[name="pop_videnctype"][value="' + cur_entry.videotype + '"]').prop('checked', true);
+    return content;
+}
 
 ChannelList.prototype.draw_channel_list = function() {
     let channellist = this;
@@ -504,15 +575,15 @@ ChannelList.prototype.draw_channel_list = function() {
     let channel_edit_buttons = $( "<div></div>" );
     let channel_edit_list = $( '<div></div>' );
 
-    let new_name = $('<input type="textarea" id="medianame">');
+    let new_name = $('<input type="text" id="medianame">');
     let new_name_label = $('<label>Name: </label>');
     new_name_label.append(new_name);
 
-    let new_imgurl = $('<input type="textarea" id="imageurl">');
+    let new_imgurl = $('<input type="text" id="imageurl">');
     let new_imgurl_label = $('<label>Image URL: </label>');
     new_imgurl_label.append(new_imgurl);
 
-    let new_vidurl = $('<input type="textarea" id="mediaurl">');
+    let new_vidurl = $('<input type="text" id="mediaurl">');
     let new_vidurl_label = $('<label>Media URL: </label>');
     new_vidurl_label.append(new_vidurl);
 
@@ -596,22 +667,142 @@ ChannelList.prototype.draw_channel_list = function() {
         });
         if( entry.type == "sublist" ) {
             ent_disp.append( $("<div></div>").text(entry.name));
-            let sublist_area = $('<details></details>');
+            let sublist_area = $('<details></details>')
+                .on('toggle', function(ev) {
+                    entry.expanded = ev.target.open;
+                });
+            if( entry.expanded == true ) {
+                sublist_area[0].open = true;
+            } else {
+                sublist_area[0].open = false;
+            }
             let sublist_summ = $("<summary>Sublist:</summary>");
+            let sublist_button_div = $('<div></div>');
             let sublist_div = $('<div></div>');
             sublist_area.append(sublist_summ);
+            sublist_area.append(sublist_button_div);
             sublist_area.append(sublist_div);
+
+            // Setup the sublist buttons
+            let add_sublist = $( '<input type="button" value="Add Sublist">' )
+                .click(function() {
+                    let content = sublist_dialog_content();
+                    let add_entry_btn = $( '<input type="button" value="Add Entry">' )
+                        .click(function() {
+                            let new_entry = {
+                                "name": $( "#pop_addname" ).val(),
+                                "image": $( "#pop_imageurl" ).val(),
+                                "type": "sublist",
+                                "entries": [],
+                            }
+
+                            entry.entries.push(new_entry);
+
+                            // use the api call to store the new version of the list
+                            channellist.put_channel_list_to_server();
+                            // re-draw the list
+                            channellist.draw_channel_list();
+
+                            close_popup(channellist.screen_props, void(0));
+                        });
+                    content.append(add_entry_btn);
+                    display_popup(channellist.screen_props, content);
+                });
+            let add_media = $( '<input type="button" value="Add Media">' )
+                .click(function() {
+                    let content = media_dialog_content();
+                    let add_entry_btn = $( '<input type="button" value="Add Entry">' )
+                        .click(function() {
+                            let new_entry = {
+                                "name": $( "#pop_addname" ).val(),
+                                "image": $( "#pop_imageurl" ).val(),
+                                "videourl": $( "#pop_videourl" ).val(),
+                                "videotype": $( 'input[name="pop_videnctype"]:checked' ).val(),
+                                "loop": $( "#pop_loopmedia" ).prop("checked"),
+                                "type": "video",
+                            }
+
+                            entry.entries.push(new_entry);
+
+                            // use the api call to store the new version of the list
+                            channellist.put_channel_list_to_server();
+                            // re-draw the list
+                            channellist.draw_channel_list();
+
+                            close_popup(channellist.screen_props, void(0));
+                        });
+                    content.append(add_entry_btn);
+                    display_popup(channellist.screen_props, content);
+                });
+            let mod_sublist = $( '<input type="button" value="Modify Sublist">' )
+                .click(function() {
+                    let content = sublist_dialog_content(entry);
+                    let mod_entry_btn = $( '<input type="button" value="Modify Entry">' )
+                        .click(function() {
+                            entry.name = $( "#pop_addname" ).val();
+                            entry.image = $( "#pop_imageurl" ).val();
+
+                            // use the api call to store the new version of the list
+                            channellist.put_channel_list_to_server();
+                            // re-draw the list
+                            channellist.draw_channel_list();
+
+                            close_popup(channellist.screen_props, void(0));
+                        });
+                    content.append(mod_entry_btn);
+                    display_popup(channellist.screen_props, content);
+                });
+            sublist_button_div.append(add_sublist);
+            sublist_button_div.append(add_media);
+            sublist_button_div.append(mod_sublist);
+
+            // Setup the sublist entries
             entry.entries.forEach(function (subentry) {
                 recursive_render(subentry, sublist_div);
             });
+
             // TODO - display more
             ent_disp.append(sublist_area);
         } else if( entry.type = "video" ) {
             ent_disp.append( $("<div></div>").text(entry.name));
-            let video_area = $("<details></details>");
+            let video_area = $("<details></details>")
+                .on('toggle', function(ev) {
+                    entry.expanded = ev.target.open;
+                });
+            if( entry.expanded == true ) {
+                video_area[0].open = true;
+            } else {
+                video_area[0].open = false;
+            }
             let video_div = $('<div></div>');
             let video_summ = $("<summary>Media Details:</summary>");
+            let video_button_div = $('<div></div>');
+
+            let mod_media = $( '<input type="button" value="Modify Media">' )
+                .click(function() {
+                    let content = media_dialog_content(entry);
+                    let mod_entry_btn = $( '<input type="button" value="Mod Entry">' )
+                        .click(function() {
+                            entry.name = $( "#pop_addname" ).val();
+                            entry.image = $( "#pop_imageurl" ).val();
+                            entry.videourl = $( "#pop_videourl" ).val();
+                            entry.videotype = $( 'input[name="pop_videnctype"]:checked' ).val();
+                            entry.loop = $( "#pop_loopmedia" ).prop("checked");
+
+                            // use the api call to store the new version of the list
+                            channellist.put_channel_list_to_server();
+                            // re-draw the list
+                            channellist.draw_channel_list();
+
+                            close_popup(channellist.screen_props, void(0));
+                        });
+                    content.append(mod_entry_btn);
+                    display_popup(channellist.screen_props, content);
+                });
+            video_button_div.append(mod_media);
+
             video_area.append(video_summ);
+            video_area.append(video_button_div);
             video_area.append(video_div);
             // TODO - display mor
             ent_disp.append(video_area);
@@ -630,7 +821,6 @@ ChannelList.prototype.draw_channel_list = function() {
 }
 
 ChannelList.prototype.set_selection = function (entry, domelem) {
-    console.log(entry, domelem);
     this.currently_selected = entry;
     $(".selected").removeClass("selected");
     domelem.classList.add("selected");
@@ -699,20 +889,23 @@ ChannelList.prototype.add_video = function (video_name, imgurl, vidurl, videncty
     return true;
 }
 
-function validate_session_or_login_screen(head_area, draw_area, foot_area) {
+function validate_session_or_login_screen(screen_props) {
     $.ajax( get_api_url("validate_session_fe"),
         get_api_properties({"method": "GET"})
     ).done( function() {
         // Do nothing - we're still valid
     }).fail( function() {
         let login_screen = new LoginScreen();
-        login_screen.draw(head_area, draw_area, foot_area);
+        login_screen.draw(screen_props);
     });
 }
 
 function get_api_url(tail) {
-    //const API_ROOT = "http://localhost:3031/api/v1/";
-    const API_ROOT = "http://192.168.7.31:3031/api/v1/";
+    let API_ROOT = "https://api.runningstream.cc/api/v1/";
+    if( document.location.host.includes("192.168.7.31") ) {
+        //const API_ROOT = "http://localhost:3031/api/v1/";
+        API_ROOT = "http://192.168.7.31:3031/api/v1/";
+    }
 
     return API_ROOT + tail;
 }
@@ -724,4 +917,27 @@ function get_api_properties(addtl) {
             "withCredentials": true,
         },
     }, addtl);
+}
+
+function display_popup(screen_props, content, after_close = function(){}) {
+    screen_props.pops_back.removeClass("notdisplayed");
+    let close_pop = function(ev) {
+        if( screen_props.pops_back.toArray().includes(ev.target) ||
+                ev.target.classList.toString().includes("close_button") ) {
+            close_popup(screen_props, after_close);
+            return false;
+        }
+        return true;
+    }
+
+    screen_props.pops_back.click( close_pop );
+    screen_props.pops_back.find(".close_button").click( close_pop );
+
+    screen_props.pops_area.empty();
+    screen_props.pops_area.append(content);
+}
+
+function close_popup(screen_props, after_close = function(){}) {
+    screen_props.pops_back.addClass("notdisplayed");
+    after_close();
 }
