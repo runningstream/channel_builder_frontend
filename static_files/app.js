@@ -374,7 +374,6 @@ MainScreen.prototype.draw = function (screen_props) {
 function ChannelListList(screen_props, channel_list_edit_area) {
     this.channel_list_list_area = $( "<div></div>" );
     this.channel_list_edit_area = channel_list_edit_area;
-    this.channel_list_edit_button_dest = screen_props.foot_area;
     this.channel_list_list = [];
     this.screen_props = screen_props;
     this.selected_list = null;
@@ -451,12 +450,10 @@ ChannelListList.prototype.draw_channel_list_list = function () {
         });
     new_channel_list_area.append(set_active_channel_list_button);
 
-    let chan_edit_butt_dest = this.channel_list_edit_button_dest;
-
     this.channel_list_list.forEach(function (channel_name) {
         let channel = $( '<div class="sel_list_ent"></div>' ).text(channel_name);
         let channellist = new ChannelList(channel_list_list.screen_props,
-            channel_name, chan_edit_butt_dest);
+            channel_name);
         channel.click(function() {
             channellist.draw(channel_list_list.channel_list_edit_area);
             channel_list_list.set_selection(channellist, channel.get()[0]);
@@ -475,17 +472,13 @@ ChannelListList.prototype.set_selection = function(channel_list, domelem) {
     domelem.classList.add("selected");
 }
 
-function ChannelList(screen_props, channel_name, chan_edit_butt_dest) {
+function ChannelList(screen_props, channel_name) {
     this.channel_name = channel_name;
-    this.channel_list_button_dest = chan_edit_butt_dest;
     this.channel_list_edit_area = $("<div></div>");
-    this.channel_list_button_area = $("<div></div>");
     this.channel_list = {"entries": []};
     this.ui_only_entry_props = ["expanded"];
     this.screen_props = screen_props;
     this.currently_selected = null;
-    this.add_entry_button = null;
-    this.change_entry_button = null;
 
     this.get_channel_list_from_server();
 }
@@ -493,8 +486,6 @@ function ChannelList(screen_props, channel_name, chan_edit_butt_dest) {
 ChannelList.prototype.draw = function (draw_area) {
     draw_area.children().detach();
     draw_area.append(this.channel_list_edit_area);
-    this.channel_list_button_dest.children().detach();
-    this.channel_list_button_dest.append(this.channel_list_button_area);
 }
 
 ChannelList.prototype.get_channel_list_from_server = function () {
@@ -572,84 +563,7 @@ ChannelList.prototype.draw_channel_list = function() {
     let channellist = this;
     channellist.channel_list.type="sublist";
     channellist.channel_list.name=channellist.channel_name;
-    let channel_edit_buttons = $( "<div></div>" );
     let channel_edit_list = $( '<div></div>' );
-
-    let new_name = $('<input type="text" id="medianame">');
-    let new_name_label = $('<label>Name: </label>');
-    new_name_label.append(new_name);
-
-    let new_imgurl = $('<input type="text" id="imageurl">');
-    let new_imgurl_label = $('<label>Image URL: </label>');
-    new_imgurl_label.append(new_imgurl);
-
-    let new_vidurl = $('<input type="text" id="mediaurl">');
-    let new_vidurl_label = $('<label>Media URL: </label>');
-    new_vidurl_label.append(new_vidurl);
-
-    let new_typesub = $('<input type="radio" value="sublist" name="thingtype">');
-    let new_typesub_label = $('<label>Sublist</label>');
-    new_typesub_label.append(new_typesub);
-    let new_typevid = $('<input type="radio" value="video" name="thingtype" checked="true">');
-    let new_typevid_label = $('<label>Media</label>');
-    new_typevid_label.append(new_typevid);
-
-    let new_loop = $('<input type="checkbox" id="loopmedia" checked="false">');
-    let new_loop_label = $('<label>Loop Media</label>');
-    new_loop_label.append(new_loop);
-
-    let new_videnc_mp4 = $('<input type="radio" value="mp4" name="videnctype" checked="true">');
-    let new_videnc_mp4_label = $('<label>MP4</label>');
-    new_videnc_mp4_label.append(new_videnc_mp4);
-    let new_videnc_aud = $('<input type="radio" value="audio" name="videnctype">');
-    let new_videnc_aud_label = $('<label>Audio</label>');
-    new_videnc_aud_label.append(new_videnc_aud);
-
-
-    this.add_entry_button = $( '<input type="button" value="Add Entry">' )
-        .click(function() {
-            // Get radio button value
-            const typeset = $('input[name="thingtype"]:checked').val();
-            const videnctype = $('input[name="videnctype"]:checked').val();
-            let result = false;
-            if( typeset == "sublist" ) {
-                // create the sublist and add it to the common data store of the list
-                result = channellist.add_sublist(new_name.val(), new_imgurl.val());
-            } else {
-                // create the video and add it to the common data store of the list
-                result = channellist.add_video(new_name.val(), new_imgurl.val(), new_vidurl.val(), videnctype);
-            }
-            if( result ) {
-                // use the api call to store the new version of the list
-                channellist.put_channel_list_to_server();
-                // re-draw the list
-                channellist.draw_channel_list();
-            }
-        });
-    this.change_entry_button = $( '<input type="button" value="Change Entry">' )
-        .click(function() {
-            // Get radio button value
-            const videnctype = $('input[name="videnctype"]:checked').val();
-
-            const result = channellist.change_vals(new_name.val(), new_imgurl.val(), new_vidurl.val(), videnctype, new_loop.prop("checked"));
-            if( result ) {
-                // use the api call to store the new version of the list
-                channellist.put_channel_list_to_server();
-                // re-draw the list
-                channellist.draw_channel_list();
-            }
-        });
-
-    channel_edit_buttons.append(new_typesub_label);
-    channel_edit_buttons.append(new_typevid_label);
-    channel_edit_buttons.append(new_name_label);
-    channel_edit_buttons.append(new_imgurl_label);
-    channel_edit_buttons.append(new_vidurl_label);
-    channel_edit_buttons.append(new_videnc_mp4_label);
-    channel_edit_buttons.append(new_videnc_aud_label);
-    channel_edit_buttons.append(new_loop_label);
-    channel_edit_buttons.append(this.add_entry_button);
-    channel_edit_buttons.append(this.change_entry_button);
 
     let recursive_render = function(entry, cur_disp_pos) {
         let ent_disp = $( '<div class="sel_list_ent"></div>' );
@@ -816,8 +730,6 @@ ChannelList.prototype.draw_channel_list = function() {
 
     channellist.channel_list_edit_area.children().detach();
     channellist.channel_list_edit_area.append(channel_edit_list);
-    channellist.channel_list_button_area.children().detach();
-    channellist.channel_list_button_area.append(channel_edit_buttons);
 }
 
 ChannelList.prototype.set_selection = function (entry, domelem) {
@@ -831,14 +743,6 @@ ChannelList.prototype.set_selection = function (entry, domelem) {
     $("#imageurl").val(entry.image);
     $("#mediaurl").val(entry.videourl);
     $("#loopmedia").prop("checked", (entry.loop === undefined) ? false : entry.loop);
-
-    if( entry.type == "sublist" ) {
-        this.add_entry_button.removeClass("notdisplayed");
-        this.change_entry_button.removeClass("notdisplayed");
-    } else if( entry.type == "video" ) {
-        this.add_entry_button.addClass("notdisplayed");
-        this.change_entry_button.removeClass("notdisplayed");
-    }
 }
 
 ChannelList.prototype.change_vals = function(name, imgurl, vidurl, videnctype, loop) {
