@@ -4,6 +4,7 @@ body {
   margin: 0px;
   padding: 0px;
   width: 100%;
+  font-family: serif;
 }
 
 h1 {
@@ -228,12 +229,21 @@ section {
   transform: scale3d(1.1, 1.1, 1.1);
   transition-duration: 0.25s;
 }
-.login_page #login_login, .login_page #login_trailer, .login_page #login_usecases, .login_page #login_docs {
+.login_page #login_intro2, .login_page #login_login, .login_page #login_trailer, .login_page #login_usecases, .login_page #login_docs {
   padding: 100px 25px;
 }
 .login_page #login_usecases, .login_page #login_docs {
   background-color: #b85042;
   color: #e7e8d1;
+}
+.login_page #login_trailer a {
+  padding: 20px;
+}
+.login_page #login_intro2 div {
+  padding: 20px;
+}
+.login_page #login_intro2 div::first-letter {
+  font-size: 2em;
 }
 .login_page #login_login div {
   padding: 1em;

@@ -83,6 +83,7 @@ LoginScreen.prototype.draw = function (screen_props) {
         '<h2>Your Personal Roku Channel</h2>' +
         '<br/>' +
         '<a href="/?signup=" class="input_button">Sign Up</a>' +
+        '<a href="#login_login" class="input_button">Sign In</a>' +
         '</div>'
     );
     let usecases_section = $(
@@ -115,12 +116,19 @@ LoginScreen.prototype.draw = function (screen_props) {
         '<h2>Free.  No catch.</h2>' +
         '<h3><a href="https://github.com/runningstream/channel_builder">Source Code Here</a></h3>' +
         "<p>Why?  We're nerds and we use this ourselves.  It doesn't cost us much to let others in too.</p>" +
+        '<p><a href="mailto:runningstreamllc@gmail.com">Contact Us</a><a href="https://docs.runningstream.cc/privacy_policy/">Privacy Policy</a></p>' +
         '</section>'
     );
     let docs_section = $(
         '<section id="login_docs">' +
         '<h2>Documentation</h2>' +
         '<h3><a href="https://docs.runningstream.cc/">Getting Started</a></h3>' +
+        '</section>'
+    );
+    let intro_sec_two = $(
+        '<section id="login_intro2">' +
+        '<div>Stream your videos, through your channel.  Build it quickly and easily.</div>' +
+        "<div>Typically with a Roku or other streaming device you're limited to streaming content someone else has provided.  With Running Stream you can stream your personal or business videos through your Roku easily.</div>" +
         '</section>'
     );
     let login_section = $(
@@ -169,11 +177,11 @@ LoginScreen.prototype.draw = function (screen_props) {
     login_section.append(login_form);
 
     screen_props.draw_area.append(intro_section);
-    screen_props.draw_area.append(login_section);
-    console.log(usecases_section);
+    screen_props.draw_area.append(intro_sec_two);
     screen_props.draw_area.append(usecases_section);
-    screen_props.draw_area.append(trailer_section);
+    screen_props.draw_area.append(login_section);
     screen_props.draw_area.append(docs_section);
+    screen_props.draw_area.append(trailer_section);
 }
 
 function RegisterScreen() {

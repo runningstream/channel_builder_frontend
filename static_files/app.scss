@@ -14,6 +14,7 @@ body {
     margin: 0px;
     padding: 0px;
     width: 100%;
+    font-family: serif;
 }
 
 div {
@@ -280,13 +281,26 @@ section {
         }
     }
 
-    #login_login, #login_trailer, #login_usecases, #login_docs {
+    #login_intro2, #login_login, #login_trailer, #login_usecases, #login_docs {
         padding: 100px 25px;
     }
 
     #login_usecases, #login_docs {
         background-color: $scarlet;
         color: $ltolive;
+    }
+
+    #login_trailer a {
+        padding: 20px;
+    }
+
+    #login_intro2 {
+        div {
+            padding: 20px;
+        }
+        div::first-letter {
+            font-size: 2em;
+        }
     }
 
     #login_login {
