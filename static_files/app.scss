@@ -4,7 +4,8 @@ $ltolive: #e7e8d1;
 $teal: #a7beae;
 $ltteal: #dbeee1;
 
-$footer_height: 2em;
+//$footer_height: 2em;
+$footer_height: 0;
 $header_height: 2em;
 $border_radius: 20px;
 
@@ -181,6 +182,17 @@ section {
 
     #chan_list, #chan_edit {
         margin-bottom: 5px;
+    }
+
+    #chan_list {
+        form {
+            padding: 5px;
+        }
+
+        input {
+            max-width: 100%;
+            box-sizing: border-box;
+        }
     }
 
     .sel_list_ent:nth-child(odd) {

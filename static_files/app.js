@@ -342,17 +342,6 @@ MainScreen.prototype.draw = function (screen_props) {
     let channel_list_list = new ChannelListList(screen_props, channel_edit_area);
     channel_list_list.draw(channel_list_area);
 
-    let validate_button = $( '<input type="button" value="Validate Session">' )
-        .click(function() {
-            $.ajax( get_api_url("validate_session_fe"),
-                get_api_properties({"method": "GET"})
-            ).done( function() {
-                display_popup(screen_props, "Session validation successful."); 
-            }).fail( function() {
-                display_popup(screen_props, "Session validation failed!"); 
-            });
-        });
-
     let logout_button = $( '<div id="logout_button"></div>' )
         .click(function() {
             $.ajax( get_api_url("logout_session_fe"),
@@ -367,7 +356,6 @@ MainScreen.prototype.draw = function (screen_props) {
 
     let profile_area = $('<div id="profile_button"></div>');
 
-    mgmt_button_area.append(validate_button);
     mgmt_button_area.append(logout_button);
 
     mgmt_button_area.append(profile_area);
@@ -573,7 +561,7 @@ ChannelList.prototype.draw_channel_list = function() {
     channellist.channel_list.name=channellist.channel_name;
     let channel_edit_list = $( '<div></div>' );
 
-    let recursive_render = function(entry, cur_disp_pos) {
+    let recursive_render = function(entry, ent_par, ent_par_ind, cur_disp_pos) {
         let ent_disp = $( '<div class="sel_list_ent"></div>' );
         ent_disp.click(function(ev) {
             channellist.set_selection(entry, ent_disp.get()[0]); 
@@ -627,7 +615,12 @@ ChannelList.prototype.draw_channel_list = function() {
 
                             close_popup(channellist.screen_props, void(0));
                         });
+                    let cancel_btn = $( '<input type="button" value="Cancel">' )
+                        .click(function() {
+                            close_popup(channellist.screen_props, void(0));
+                        });
                     content.append(add_entry_btn);
+                    content.append(cancel_btn);
                     display_popup(channellist.screen_props, content);
                 });
             let add_media = $( '<input type="button" value="Add Media">' )
@@ -653,7 +646,12 @@ ChannelList.prototype.draw_channel_list = function() {
 
                             close_popup(channellist.screen_props, void(0));
                         });
+                    let cancel_btn = $( '<input type="button" value="Cancel">' )
+                        .click(function() {
+                            close_popup(channellist.screen_props, void(0));
+                        });
                     content.append(add_entry_btn);
+                    content.append(cancel_btn);
                     display_popup(channellist.screen_props, content);
                 });
             let mod_sublist = $( '<input type="button" value="Modify Sublist">' )
@@ -671,16 +669,47 @@ ChannelList.prototype.draw_channel_list = function() {
 
                             close_popup(channellist.screen_props, void(0));
                         });
+                    let cancel_btn = $( '<input type="button" value="Cancel">' )
+                        .click(function() {
+                            close_popup(channellist.screen_props, void(0));
+                        });
                     content.append(mod_entry_btn);
+                    content.append(cancel_btn);
+                    display_popup(channellist.screen_props, content);
+                });
+            let del_sublist = $( '<input type="button" value="Delete Sublist">' )
+                .click(function() {
+                    let content = $( "<div><p>Confirm deletion</p></div>" );
+                    let del_entry_btn = $( '<input type="button" value="Delete Sublist">' )
+                        .click(function() {
+                            ent_par.entries.splice(ent_par_ind, 1);
+
+                            // use the api call to store the new version of the list
+                            channellist.put_channel_list_to_server();
+                            // re-draw the list
+                            channellist.draw_channel_list();
+
+                            close_popup(channellist.screen_props, void(0));
+                        });
+                    let cancel_btn = $( '<input type="button" value="Cancel">' )
+                        .click(function() {
+                            close_popup(channellist.screen_props, void(0));
+                        });
+                    content.append(del_entry_btn);
+                    content.append(cancel_btn);
                     display_popup(channellist.screen_props, content);
                 });
             sublist_button_div.append(add_sublist);
             sublist_button_div.append(add_media);
-            sublist_button_div.append(mod_sublist);
+
+            if( ent_par !== undefined ) {
+                sublist_button_div.append(mod_sublist);
+                sublist_button_div.append(del_sublist);
+            }
 
             // Setup the sublist entries
-            entry.entries.forEach(function (subentry) {
-                recursive_render(subentry, sublist_div);
+            entry.entries.forEach(function (subentry, ind) {
+                recursive_render(subentry, entry, ind, sublist_div);
             });
 
             // TODO - display more
@@ -703,7 +732,7 @@ ChannelList.prototype.draw_channel_list = function() {
             let mod_media = $( '<input type="button" value="Modify Media">' )
                 .click(function() {
                     let content = media_dialog_content(entry);
-                    let mod_entry_btn = $( '<input type="button" value="Mod Entry">' )
+                    let mod_entry_btn = $( '<input type="button" value="Modify Entry">' )
                         .click(function() {
                             entry.name = $( "#pop_addname" ).val();
                             entry.image = $( "#pop_imageurl" ).val();
@@ -718,10 +747,38 @@ ChannelList.prototype.draw_channel_list = function() {
 
                             close_popup(channellist.screen_props, void(0));
                         });
+                    let cancel_btn = $( '<input type="button" value="Cancel">' )
+                        .click(function() {
+                            close_popup(channellist.screen_props, void(0));
+                        });
                     content.append(mod_entry_btn);
+                    content.append(cancel_btn);
+                    display_popup(channellist.screen_props, content);
+                });
+            let del_media = $( '<input type="button" value="Delete Media">' )
+                .click(function() {
+                    let content = $( "<div><p>Confirm deletion</p></div>" );
+                    let del_entry_btn = $( '<input type="button" value="Delete Media">' )
+                        .click(function() {
+                            ent_par.entries.splice(ent_par_ind, 1);
+
+                            // use the api call to store the new version of the list
+                            channellist.put_channel_list_to_server();
+                            // re-draw the list
+                            channellist.draw_channel_list();
+
+                            close_popup(channellist.screen_props, void(0));
+                        });
+                    let cancel_btn = $( '<input type="button" value="Cancel">' )
+                        .click(function() {
+                            close_popup(channellist.screen_props, void(0));
+                        });
+                    content.append(del_entry_btn);
+                    content.append(cancel_btn);
                     display_popup(channellist.screen_props, content);
                 });
             video_button_div.append(mod_media);
+            video_button_div.append(del_media);
 
             video_area.append(video_summ);
             video_area.append(video_button_div);
@@ -733,7 +790,7 @@ ChannelList.prototype.draw_channel_list = function() {
         return ent_disp.get()[0];
     };
 
-    let top_level_elem = recursive_render(this.channel_list, channel_edit_list);
+    let top_level_elem = recursive_render(this.channel_list, undefined, undefined, channel_edit_list);
     this.set_selection(this.channel_list, top_level_elem); 
 
     channellist.channel_list_edit_area.children().detach();

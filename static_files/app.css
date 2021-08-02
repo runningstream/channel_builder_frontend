@@ -77,19 +77,19 @@ section {
 }
 
 #screen_area {
-  margin-bottom: -2em;
+  margin-bottom: 0;
   margin-top: 2em;
 }
 
 #screen_area:after {
-  height: 2em;
+  height: 0;
   content: "";
   display: block;
 }
 
 #footer_area {
   position: fixed;
-  height: 2em;
+  height: 0;
   width: 100%;
   left: 0px;
   bottom: 0px;
@@ -152,6 +152,13 @@ section {
 }
 .mainscreen_page #chan_list, .mainscreen_page #chan_edit {
   margin-bottom: 5px;
+}
+.mainscreen_page #chan_list form {
+  padding: 5px;
+}
+.mainscreen_page #chan_list input {
+  max-width: 100%;
+  box-sizing: border-box;
 }
 .mainscreen_page .sel_list_ent:nth-child(odd) {
   background: #a7beae;
