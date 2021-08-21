@@ -206,7 +206,7 @@ RegisterScreen.prototype.draw = function (screen_props) {
     );
     let trailer_section = $(
         '<section>' +
-        '<p>Privacy policy: we will never give anyone else your information.  You will only ever receive a signup confirmation email from us.</p>' +
+        '<p><a href="https://docs.runningstream.cc/privacy_policy/">Full Privacy Policy</a> - in short, we will never give anyone else your information.  You will only ever receive a signup confirmation email from us.</p>' +
         '</section>'
     );
     let register_form = $( 
