@@ -1073,9 +1073,28 @@ mod api {
     {
         let cors = warp::cors()
             .allow_origin(cors_origin.as_str())
-            .allow_headers(vec!["sec-ch-ua"])
+            //.allow_headers(vec!["sec-ch-ua"])
             .allow_methods(vec!["GET", "POST"])
             .allow_credentials(true);
+
+        fn get_org_or_ref(cors_origin: String) 
+            -> impl Filter<Extract = (), Error = warp::Rejection> + Clone
+        {
+            warp::header("origin")
+                .or(warp::header("referer"))
+                .unify()
+                .and_then(move |source: String| {
+                    let cors_origin_dupe = cors_origin.clone();
+                    async move {
+                        if source.starts_with(&cors_origin_dupe) {
+                            Ok(())
+                        } else {
+                            Err(reject::custom(Rejections::InvalidOriginOrReferer))
+                        }
+                    }
+                })
+                .untuple_one()
+        }
 
         api_authenticate_fe(db.clone())
             .or(api_authenticate_ro(db.clone()))
@@ -1092,6 +1111,7 @@ mod api {
             .or(api_validate_session_ro(db.clone()))
             //.or(serve_static_index())
             //.or(serve_static_files())
+            .and(get_org_or_ref(cors_origin))
             .with(cors.clone())
             .recover(handle_rejection)
     }
@@ -1342,7 +1362,7 @@ enum Rejections { InvalidSession, InvalidUser, InvalidPassword,
     HashValidationError, ErrorCreatingUser, ErrorValidatingAccount,
     ErrorAddingSessionKey, ErrorGettingChannelLists, ErrorGettingChannelList,
     ErrorParsingChannelList, ErrorSettingChannelList, ErrorCreatingChannelList,
-    ErrorSettingActiveChannel, InvalidValidationCode }
+    ErrorSettingActiveChannel, InvalidValidationCode, InvalidOriginOrReferer }
 
 impl warp::reject::Reject for Rejections {}
 
