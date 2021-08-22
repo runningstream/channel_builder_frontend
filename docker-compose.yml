@@ -41,8 +41,8 @@ services:
             SMTP_PASSWORD_FILE: /run/secrets/smtp_password
             EMAIL_FROM_ADDR_FILE: /run/secrets/email_from
             RUST_BACKTRACE: 1
-        expose:
-            - 3031
+        ports:
+            - 3031:3031
         secrets:
             - db_password
             - smtp_server
