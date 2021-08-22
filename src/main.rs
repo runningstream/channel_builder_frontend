@@ -1077,10 +1077,7 @@ mod api {
             .allow_methods(vec!["GET", "POST"])
             .allow_credentials(true);
 
-        fn get_org_or_ref(cors_origin: String) 
-            -> impl Filter<Extract = (), Error = warp::Rejection> + Clone
-        {
-            warp::header("origin")
+        let origin_referer_filt = warp::header("origin")
                 .or(warp::header("referer"))
                 .unify()
                 .and_then(move |source: String| {
@@ -1093,8 +1090,7 @@ mod api {
                         }
                     }
                 })
-                .untuple_one()
-        }
+                .untuple_one();
 
         api_authenticate_fe(db.clone())
             .or(api_authenticate_ro(db.clone()))
@@ -1111,9 +1107,9 @@ mod api {
             .or(api_validate_session_ro(db.clone()))
             //.or(serve_static_index())
             //.or(serve_static_files())
-            .and(get_org_or_ref(cors_origin))
-            .with(cors.clone())
+            .and(origin_referer_filt.clone())
             .recover(handle_rejection)
+            .with(cors.clone())
     }
 
     /*
