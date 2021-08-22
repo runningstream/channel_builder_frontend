@@ -1467,7 +1467,7 @@ mod api_handlers {
                 Ok(warp::reply::with_header(
                     base_reply,
                     "Set-Cookie", 
-                    format!("{}={}; Max-Age={}", 
+                    format!("{}={}; Max-Age={}; SameSite=Lax", 
                         api::SESSION_COOKIE_NAME, sess_key,
                         max_age)
                 )),
