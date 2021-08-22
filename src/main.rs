@@ -1337,19 +1337,37 @@ mod api {
         -> Result<impl Reply, warp::Rejection>
     {
         let code;
-        let message: String;
+        let message;
 
-        if let Some(Rejections::InvalidSession) = err.find() {
-            code = StatusCode::FORBIDDEN;
-            message = "Forbidden".to_string();
-            Ok(warp::reply::with_status(message, code))
-        } else if let Some(Rejections::InvalidValidationCode) = err.find() {
-            code = StatusCode::FORBIDDEN;
-            message = "Forbidden".to_string();
-            Ok(warp::reply::with_status(message, code))
+        // TODO add in more error handling?
+
+        if err.is_not_found() {
+            code = StatusCode::NOT_FOUND;
+            message = "Not Found";
         } else {
-            Err(err)
+            match err.find() {
+                Some(Rejections::InvalidSession) |
+                Some(Rejections::InvalidValidationCode) |
+                Some(Rejections::InvalidUser) |
+                Some(Rejections::InvalidPassword)
+                => {
+                    code = StatusCode::FORBIDDEN;
+                    message = "Forbidden";
+                },
+                Some(Rejections::HashValidationError)
+                => {
+                    code = StatusCode::INTERNAL_SERVER_ERROR;
+                    message = "Internal Server Error";
+                },
+                _ => {
+                    print!("Error on request: {:?}", err);
+                    code = StatusCode::BAD_REQUEST;
+                    message = "Bad Request";
+                },
+            }
         }
+
+        Ok(warp::reply::with_status(message.to_string(), code))
     }
 }
 
