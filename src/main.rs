@@ -420,11 +420,12 @@ mod db {
         SetActiveChannel { user_id: i32, list_name: String },
     }
 
-    #[derive(Clone)]
+    #[derive(Clone,Debug)]
     pub enum Response {
         Empty,
         Bool(bool),
         StringResp(String),
+        UserID(i32),
         ValidatedKey(bool, i32),
         UserPassHash(String, i32, bool),
     }
@@ -555,12 +556,18 @@ mod db {
             // Make the database insert
             match diesel::insert_into(user_data::table)
                 .values(&new_user)
-                .execute(&dat.db_conn)
+                .returning(user_data::id)
+                .get_results(&dat.db_conn)
             {
-                Ok(1) => Ok(Response::Empty),
-                Ok(val) => {
-                    println!("Adding user returned other-than 1: {}", val);
-                    Err(DBError::InvalidDBResponse)},
+                //Ok(1) => Ok(Response::Empty), // From .execute, TODO delete
+                Ok(user_ids) => {
+                    if user_ids.len() != 1 {
+                        println!("Adding user returned other-than 1 row: {:?}", user_ids);
+                        Err(DBError::InvalidDBResponse)
+                    } else {
+                        Ok(Response::UserID(user_ids[0]))
+                    }
+                },
                 Err(err) => {
                     println!("Error {:?}", err);
                     Err(DBError::InvalidDBResponse)},
@@ -1488,12 +1495,16 @@ mod api_handlers {
         let reg_key = gen_large_rand_str();
         println!("Adding user with reg key ?val_code={}", reg_key);
 
-        match db.please(Action::AddUser {
+        let user_id = match db.please(Action::AddUser {
             user: form_dat.username.clone(),
             pass: form_dat.password,
             reg_key: reg_key.clone(),
         }).await {
-            Ok(_) => {},
+            Ok(Response::UserID(user_id)) => user_id,
+            Ok(resp) => {
+                println!("Invalid user ID returned when addin user: {:?}", resp); 
+                return Err(reject::custom(Rejections::ErrorCreatingUser));
+            },
             Err(err) => {
                 println!("Error adding user: {}", err); 
                 return Err(reject::custom(Rejections::ErrorCreatingUser));
@@ -1506,6 +1517,27 @@ mod api_handlers {
                 reg_key: reg_key,
             }
         )).await;
+
+        let first_chan_nm = "First Channel";
+
+        let first_chan_success = match db.please(Action::CreateChannelList {
+            user_id: user_id,
+            list_name: first_chan_nm.into(),
+        }).await {
+            Ok(_) => true,
+            Err(err) => {println!("User created, error creating first channel list: {}", err);
+                false} 
+        };
+
+        if first_chan_success {
+            match db.please(Action::SetActiveChannel {
+                user_id: user_id,
+                list_name: first_chan_nm.into(),
+            }).await {
+                Ok(_) => {},
+                Err(err) => {println!("User created, error setting first channel active: {}", err)}
+            }
+        }
 
         Ok(StatusCode::OK)
     }
