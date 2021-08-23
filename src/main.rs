@@ -1346,23 +1346,31 @@ mod api {
             message = "Not Found";
         } else {
             match err.find() {
+                Some(Rejections::InvalidUserLookup) |
+                Some(Rejections::InvalidUserNonValidated) |
+                Some(Rejections::InvalidPassword) |
                 Some(Rejections::InvalidSession) |
-                Some(Rejections::InvalidValidationCode) |
-                Some(Rejections::InvalidUser) |
-                Some(Rejections::InvalidPassword)
+                Some(Rejections::InvalidEmailAddr) |
+                Some(Rejections::InvalidValidationCode)
                 => {
                     code = StatusCode::FORBIDDEN;
                     message = "Forbidden";
                 },
-                Some(Rejections::HashValidationError)
+                Some(Rejections::InvalidOriginOrReferer)
                 => {
+                    code = StatusCode::BAD_REQUEST;
+                    message = "Bad Request";
+                },
+                Some(Rejections::ErrorInternal(content))
+                => {
+                    print!("ErrorInternal: {}", content);
                     code = StatusCode::INTERNAL_SERVER_ERROR;
                     message = "Internal Server Error";
                 },
-                _ => {
-                    print!("Error on request: {:?}", err);
-                    code = StatusCode::BAD_REQUEST;
-                    message = "Bad Request";
+                other => {
+                    print!("Unhandled error on request: {:?}", other);
+                    code = StatusCode::INTERNAL_SERVER_ERROR;
+                    message = "Internal Server Error";
                 },
             }
         }
@@ -1372,11 +1380,15 @@ mod api {
 }
 
 #[derive(Debug)]
-enum Rejections { InvalidSession, InvalidUser, InvalidPassword,
-    HashValidationError, ErrorCreatingUser, ErrorValidatingAccount,
-    ErrorAddingSessionKey, ErrorGettingChannelLists, ErrorGettingChannelList,
-    ErrorParsingChannelList, ErrorSettingChannelList, ErrorCreatingChannelList,
-    ErrorSettingActiveChannel, InvalidValidationCode, InvalidOriginOrReferer }
+enum Rejections { 
+    // User-caused problems
+    InvalidUserLookup, InvalidUserNonValidated,
+    InvalidPassword, InvalidSession, InvalidEmailAddr,
+    InvalidValidationCode, InvalidOriginOrReferer,
+
+    // System Problems
+    ErrorInternal(String)
+}
 
 impl warp::reject::Reject for Rejections {}
 
@@ -1452,19 +1464,18 @@ mod api_handlers {
             }).await {
                 Ok(Response::UserPassHash(pass_hash, hash_ver, valid_status)) => 
                     (pass_hash, hash_ver, valid_status),
-                Ok(_) => {
-                    println!("Invalid type returned by GetUserPassHash");
-                    return Err(reject::custom(Rejections::InvalidUser));
+                Ok(resp) => {
+                    return Err(reject::custom(Rejections::ErrorInternal(
+                        format!("GetUserPassHash response: {:?}", resp)
+                    )));
                 },
-                Err(err) => {
-                    println!("Error getting user: {}", err);
-                    return Err(reject::custom(Rejections::InvalidUser));
+                Err(_) => {
+                    return Err(reject::custom(Rejections::InvalidUserLookup));
                 },
             };
 
         if !valid_status {
-            println!("Non-validated user attempted login");
-            return Err(reject::custom(Rejections::InvalidUser));
+            return Err(reject::custom(Rejections::InvalidUserNonValidated));
         }
 
         let sess_key = gen_large_rand_str();
@@ -1476,8 +1487,12 @@ mod api_handlers {
         }).await {
             Ok(_) => {},
             Err(err) => {
-                println!("Error adding session key: {}", err);
-                return Err(reject::custom(Rejections::ErrorAddingSessionKey))},
+                return Err(reject::custom(
+                    Rejections::ErrorInternal(
+                        format!("AddSessKey response: {:?}",err)
+                    )
+                ))
+            },
         };
 
         let max_age = match sess_type {
@@ -1485,7 +1500,7 @@ mod api_handlers {
             SessType::Roku => api::SESSION_COOKIE_RO_MAX_AGE,
         };
 
-        println!("Authenticated {:?}: {:?} key {}", sess_type, form_dat, sess_key);
+        //println!("Authenticated {:?}: {:?} key {}", sess_type, form_dat, sess_key);
 
         // Add the session key as content if this is a roku auth
         // TODO: make it so we don't have to do that anymore...
@@ -1493,6 +1508,9 @@ mod api_handlers {
             SessType::Roku => warp::reply::html(sess_key.clone()),
             _ => warp::reply::html("".to_string()),
         };
+
+        // TODO - why do I authenticate the password after making the session key?
+        // that doesn't seem to make sense
 
         match password_hash_version::validate_pw_ver(&form_dat.username,
             &form_dat.password, &pass_hash, hash_ver)
@@ -1505,10 +1523,12 @@ mod api_handlers {
                         api::SESSION_COOKIE_NAME, sess_key,
                         max_age)
                 )),
-            Ok(false) => {println!("Wrong password");
-                Err(reject::custom(Rejections::InvalidPassword))},
-            Err(err) => {println!("Error validating hash: {}", err);
-                Err(reject::custom(Rejections::HashValidationError))},
+            Ok(false) =>
+                Err(reject::custom(Rejections::InvalidPassword)),
+            Err(err) =>
+                Err(reject::custom(Rejections::ErrorInternal(
+                    format!("Validating password: {:?}", err)
+                ))),
         }
     }
 
@@ -1519,9 +1539,8 @@ mod api_handlers {
         // Fail early if the username is invalid
         match email::parse_addr(&form_dat.username) {
             Ok(_) => {},
-            Err(err) => {
-                println!("Requested username is invalid email: {}", err);
-                return Err(reject::custom(Rejections::ErrorCreatingUser));
+            Err(_) => {
+                return Err(reject::custom(Rejections::InvalidEmailAddr));
             }
         };
 
@@ -1536,12 +1555,14 @@ mod api_handlers {
         }).await {
             Ok(Response::UserID(user_id)) => user_id,
             Ok(resp) => {
-                println!("Invalid user ID returned when addin user: {:?}", resp); 
-                return Err(reject::custom(Rejections::ErrorCreatingUser));
+                return Err(reject::custom(Rejections::ErrorInternal(
+                    format!("AddUser response: {:?}", resp)
+                )));
             },
             Err(err) => {
-                println!("Error adding user: {}", err); 
-                return Err(reject::custom(Rejections::ErrorCreatingUser));
+                return Err(reject::custom(Rejections::ErrorInternal(
+                    format!("AddUser error: {:?}", err)
+                )));
             },
         };
 
@@ -1559,8 +1580,10 @@ mod api_handlers {
             list_name: first_chan_nm.into(),
         }).await {
             Ok(_) => true,
-            Err(err) => {println!("User created, error creating first channel list: {}", err);
-                false} 
+            Err(err) => {
+                println!("User created, error creating first channel list: {}", err);
+                false
+            } 
         };
 
         if first_chan_success {
@@ -1569,7 +1592,9 @@ mod api_handlers {
                 list_name: first_chan_nm.into(),
             }).await {
                 Ok(_) => {},
-                Err(err) => {println!("User created, error setting first channel active: {}", err)}
+                Err(err) => {
+                    println!("User created, error setting first channel active: {}", err)
+                }
             }
         }
 
@@ -1582,17 +1607,16 @@ mod api_handlers {
     {
         match db.please(Action::ValidateAccount { val_code: opts.val_code }).await {
             Ok(Response::Bool(true)) => Ok(StatusCode::OK),
-            Ok(_) => {
-                println!("Invalid validation code received."); 
-                Err(reject::custom(Rejections::InvalidValidationCode))
-            },
-            Err(db::DBError::InvalidValidationCode) => {
-                println!("Invalid validation code received."); 
-                Err(reject::custom(Rejections::InvalidValidationCode))
-            },
-            Err(err) => {println!("Error validating account: {}", err); 
-                Err(reject::custom(Rejections::ErrorValidatingAccount))
-            },
+            Ok(resp) =>
+                Err(reject::custom(Rejections::ErrorInternal(
+                    format!("ValidateAccount Response {:?}", resp)
+                ))),
+            Err(db::DBError::InvalidValidationCode) =>
+                Err(reject::custom(Rejections::InvalidValidationCode)),
+            Err(err) =>
+                Err(reject::custom(Rejections::ErrorInternal(
+                    format!("ValidateAccount Error {:?}", err)
+                ))),
         }
         
     }
@@ -1630,8 +1654,10 @@ mod api_handlers {
             sess_key: sess_key,
         }).await {
             Ok(_) => Ok(StatusCode::OK),
-            Err(err) => {println!("Error logging out account: {}", err); 
-                Err(reject::custom(Rejections::ErrorValidatingAccount))},
+            Err(err) => 
+                Err(reject::custom(Rejections::ErrorInternal(
+                    format!("LogoutSessKey Error: {:?}", err)
+                ))),
         }
     }
 
@@ -1644,11 +1670,14 @@ mod api_handlers {
             user_id: user_id,
         }).await {
             Ok(Response::StringResp(val)) => Ok(warp::reply::html(val)),
-            Ok(_) => {
-                println!("Invalid return type received from GetChannelLists");
-                Err(reject::custom(Rejections::ErrorGettingChannelLists))},
-            Err(err) => {println!("Error getting channel lists: {}", err); 
-                Err(reject::custom(Rejections::ErrorGettingChannelLists))},
+            Ok(resp) =>
+                Err(reject::custom(Rejections::ErrorInternal(
+                    format!("GetChannelLists Response: {:?}", resp)
+                ))),
+            Err(err) => 
+                Err(reject::custom(Rejections::ErrorInternal(
+                    format!("GetChannelLists Error: {:?}", err)
+                ))),
         }
     }
 
@@ -1663,11 +1692,14 @@ mod api_handlers {
             list_name: opts.list_name,
         }).await {
             Ok(Response::StringResp(val)) => Ok(warp::reply::html(val)),
-            Ok(_) => {
-                println!("Invalid return type received from GetChannelList");
-                Err(reject::custom(Rejections::ErrorGettingChannelList))},
-            Err(err) => {println!("Error getting channel list: {}", err); 
-                Err(reject::custom(Rejections::ErrorGettingChannelList))},
+            Ok(resp) =>
+                Err(reject::custom(Rejections::ErrorInternal(
+                    format!("GetChannelList Response: {:?}", resp)
+                ))),
+            Err(err) =>
+                Err(reject::custom(Rejections::ErrorInternal(
+                    format!("GetChannelList Error: {:?}", err)
+                ))),
         }
     }
 
@@ -1680,20 +1712,25 @@ mod api_handlers {
             user_id: user_id,
         }).await {
             Ok(Response::StringResp(val)) => val,
-            Ok(_) => {
-                println!("Invalid return type received from GetActiveChannel");
-                return Err(reject::custom(Rejections::ErrorGettingChannelList));
+            Ok(resp) => {
+                return Err(reject::custom(Rejections::ErrorInternal(
+                    format!("GetActiveChannel Response: {:?}", resp)
+                )));
             },
             Err(err) => {
-                println!("Error getting active channel: {}", err); 
-                return Err(reject::custom(Rejections::ErrorGettingChannelList));
+                return Err(reject::custom(Rejections::ErrorInternal(
+                    format!("GetActiveChannel Error: {:?}", err)
+                )));
             },
         };
 
         let json: serde_json::Value = match serde_json::from_str(&channel_list) {
             Ok(val) => val,
-            Err(err) => {println!("Error parsing channel list: {}", err); 
-                return Err(reject::custom(Rejections::ErrorParsingChannelList))},
+            Err(err) => {
+                return Err(reject::custom(Rejections::ErrorInternal(
+                    format!("serde JSON Error: {:?}", err)
+                )));
+            },
         };
 
         let xml_str1 = helpers::build_xml(json.clone());
@@ -1715,8 +1752,10 @@ mod api_handlers {
             list_data: form_dat.listdata,
         }).await {
             Ok(_) => Ok(StatusCode::OK),
-            Err(err) => {println!("Error setting channel list: {}", err); 
-                Err(reject::custom(Rejections::ErrorSettingChannelList))},
+            Err(err) =>
+                Err(reject::custom(Rejections::ErrorInternal(
+                    format!("SetChannelList Error: {:?}", err)
+                ))),
         }
     }
 
@@ -1731,8 +1770,10 @@ mod api_handlers {
             list_name: form_dat.listname,
         }).await {
             Ok(_) => Ok(StatusCode::OK),
-            Err(err) => {println!("Error creating channel list: {}", err); 
-                Err(reject::custom(Rejections::ErrorCreatingChannelList))},
+            Err(err) =>
+                Err(reject::custom(Rejections::ErrorInternal(
+                    format!("CreateChannelList Error: {:?}", err)
+                ))),
         }
     }
 
@@ -1747,8 +1788,10 @@ mod api_handlers {
             list_name: form_dat.listname,
         }).await {
             Ok(_) => Ok(StatusCode::OK),
-            Err(err) => {println!("Error setting active channel list: {}", err); 
-                Err(reject::custom(Rejections::ErrorSettingActiveChannel))},
+            Err(err) =>
+                Err(reject::custom(Rejections::ErrorInternal(
+                    format!("SetActiveChannel Error: {:?}", err)
+                ))),
         }
     }
 
