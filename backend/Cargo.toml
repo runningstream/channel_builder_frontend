@@ -18,3 +18,4 @@ argon2 = "0.1"
 rand = "0.8"
 chrono = "0.4"
 lettre = { version = "0.10.0-rc.3", features = ["rustls-tls"] }
+thiserror = "1.0.29"

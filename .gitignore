@@ -2,7 +2,7 @@ backend/target
 *.swp
 *.css.map
 *.secret
-frontend/Cargo.lock
+backend/Cargo.lock
 dev_diesel_env
 frontend/node_modules/
 frontend/package-lock.json
