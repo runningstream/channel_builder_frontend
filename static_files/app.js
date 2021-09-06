@@ -8,6 +8,7 @@ function main() {
         foot_area: $("#footer_area"),
         pops_back: $("#popup_back"),
         pops_area: $("#popup_area"),
+        spin_back: $("#spinner_back"),
     };
 
     const urlParams = new URLSearchParams(window.location.search);
@@ -28,17 +29,20 @@ function main() {
     }
 
     // Determine if we already have a valid session id, and if so jump to the main screen
-    $.ajax( get_api_url("validate_session_fe"),
-        get_api_properties({"method": "GET"})
-    ).done( function() {
-        // Display the main screen
-        let main_screen = new MainScreen();
-        main_screen.draw(screen_props);
-    }).fail( function() {
-        // Display the login screen
-        let login_screen = new LoginScreen();
-        login_screen.draw(screen_props);
-    });
+    make_api_request("validate_session_fe", {"method": "GET"}, screen_props,
+        false,
+        function() {
+            // Display the main screen
+            let main_screen = new MainScreen();
+            main_screen.draw(screen_props);
+        },
+        function() {
+            // Display the login screen
+            window.history.pushState("", "", "/");
+            let login_screen = new LoginScreen();
+            login_screen.draw(screen_props);
+        }
+    );
 }
 
 function UIScreen() {
@@ -121,6 +125,8 @@ LoginScreen.prototype.draw = function (screen_props) {
     );
     let docs_section = $(
         '<section id="login_docs">' +
+        '<h2>Apps</h2>' +
+        '<h3><a href="https://channelstore.roku.com/details/707afc86801deb28e35d3984cdc59b68/running-stream">Roku Channel</a></h3>' +
         '<h2>Documentation</h2>' +
         '<h3><a href="https://docs.runningstream.cc/">Getting Started</a></h3>' +
         '</section>'
@@ -151,15 +157,17 @@ LoginScreen.prototype.draw = function (screen_props) {
                 "username": $("#login_username").val(),
                 "password": $("#login_password").val(),
             };
-            $.ajax( get_api_url("authenticate_fe"),
-                get_api_properties({"method": "POST", "data": login_dat})
-            ).done(function() {
-                // TODO determine if we now have a session id, and if so, jump to the next part, otherwise display failure
-                let main_screen = new MainScreen();
-                main_screen.draw(screen_props);
-            }).fail(function(jqXHR, text_status, asdf) {
-                display_popup(screen_props, "Login Failed");
-            });
+            make_api_request("authenticate_fe",
+                {"method": "POST", "data": login_dat}, screen_props, true,
+                function() {
+                    // TODO determine if we now have a session id, and if so, jump to the next part, otherwise display failure
+                    let main_screen = new MainScreen();
+                    main_screen.draw(screen_props);
+                },
+                function(jqXHR, text_status, asdf) {
+                    display_popup(screen_props, "Login Failed");
+                }
+            );
 
             // Return false to cancel the submit action
             return false;
@@ -234,22 +242,25 @@ RegisterScreen.prototype.draw = function (screen_props) {
                 "username": $("#reg_username").val(),
                 "password": $("#reg_password").val(),
             };
-            $.ajax( get_api_url("create_account"),
-                get_api_properties({"method": "POST", "data": reg_dat})
-            ).done(function() {
-                // TODO determine whether it was successful and display a message
-                display_popup(screen_props,
-                    "User account requested, look for an email...",
-                    function() {
-                        let login_screen = new LoginScreen();
-                        login_screen.draw(screen_props);
-                    }
-                );
-            }).fail(function() {
-                // TODO determine reason for failure and take action
-                display_popup(screen_props,
-                    "User account creation failed!");
-            });
+            make_api_request("create_account",
+                {"method": "POST", "data": reg_dat}, screen_props, true,
+                function() {
+                    // TODO determine whether it was successful and display a message
+                    display_popup(screen_props,
+                        "User account requested, look for an email...",
+                        function() {
+                            window.history.pushState("", "", "/");
+                            let login_screen = new LoginScreen();
+                            login_screen.draw(screen_props);
+                        }
+                    );
+                },
+                function() {
+                    // TODO determine reason for failure and take action
+                    display_popup(screen_props,
+                        "User account creation failed!");
+                }
+            );
             return false;
         });
     let register_section = $(
@@ -295,20 +306,23 @@ ValidationScreen.prototype.draw = function (screen_props) {
                 login_screen.draw(screen_props);
             };
             
-            $.ajax( get_api_url("validate_account?val_code="+val_code),
-                get_api_properties({"method": "GET"})
-            ).done( function() {
-                // TODO determine whether it was successful and display a message
-                display_popup(screen_props, "User validation successful!  Now login.",
-                    goto_login);
-            }).fail( function(jqXHR, textStatus, errorThrown) {
-                // TODO test the part below, perhaps display in a nicer way
-                if( jqXHR.status == 403 ) {
-                    display_popup(screen_props, "Invalid validation code!", goto_login); 
-                } else {
-                    display_popup(screen_props, "Validation failed.", goto_login); 
+            make_api_request(
+                "validate_account?val_code="+val_code,
+                {"method": "GET"}, screen_props, true,
+                function() {
+                    // TODO determine whether it was successful and display a message
+                    display_popup(screen_props, "User validation successful!  Now login.",
+                        goto_login);
+                },
+                function(jqXHR, textStatus, errorThrown) {
+                    // TODO test the part below, perhaps display in a nicer way
+                    if( jqXHR.status == 403 ) {
+                        display_popup(screen_props, "Invalid validation code!", goto_login); 
+                    } else {
+                        display_popup(screen_props, "Validation failed.", goto_login); 
+                    }
                 }
-            });
+            );
             return false;
         });
     let validate_button = $( '<input type="submit" value="Validate Account">' );
@@ -335,34 +349,41 @@ MainScreen.prototype.draw = function (screen_props) {
     $("body").addClass("mainscreen_page");
 
     let content = $( '<div id="content"></div>' );
-    let mgmt_button_area = $( "<div></div>" );
+    let name_area = $( '<div id="hdr_name">Running Stream</div>' );
+    let mgmt_button_area = $( '<div id="mgmt_btns"></div>' );
     let channel_list_area = $( '<div id="chan_list"></div>' );
     let channel_edit_area = $( '<div id="chan_edit"></div>' );
 
     let channel_list_list = new ChannelListList(screen_props, channel_edit_area);
     channel_list_list.draw(channel_list_area);
 
-    let logout_button = $( '<div id="logout_button"></div>' )
+    let logout_button = $( '<div id="logout_button" title="Logout"></div>' )
         .click(function() {
-            $.ajax( get_api_url("logout_session_fe"),
-                get_api_properties({"method": "GET"})
-            ).done( function() {
-                let login_screen = new LoginScreen();
-                login_screen.draw(screen_props);
-            }).fail( function() {
-                validate_session_or_login_screen(screen_props);
-            });
+            make_api_request("logout_session_fe", {"method": "GET"},
+                screen_props, true,
+                function() {
+                    window.history.pushState("", "", "/");
+                    let login_screen = new LoginScreen();
+                    login_screen.draw(screen_props);
+                },
+                function() {
+                    validate_session_or_login_screen(screen_props);
+                }
+            );
         });
 
-    let profile_area = $('<div id="profile_button"></div>');
+    let help_button = $( '<a href="https://docs.runningstream.cc/" target="__blank__" id="help_button" title="Documentation"></a>' )
 
+    mgmt_button_area.append(help_button);
     mgmt_button_area.append(logout_button);
 
-    mgmt_button_area.append(profile_area);
+    //let profile_area = $('<div id="profile_button"></div>');
+    //mgmt_button_area.append(profile_area);
 
     content.append(channel_list_area);
     content.append(channel_edit_area);
 
+    screen_props.head_area.append(name_area);
     screen_props.head_area.append(mgmt_button_area);
     screen_props.draw_area.append(content);
 }
@@ -379,15 +400,17 @@ function ChannelListList(screen_props, channel_list_edit_area) {
 
 ChannelListList.prototype.get_channel_lists_from_server = function (screen_props) {
     let channellistlist = this;
-    $.ajax( get_api_url("get_channel_lists"),
-        get_api_properties({"method": "GET"})
-    ).done( function(data_str) {
-        channellistlist.channel_list_list = JSON.parse(data_str);
-        channellistlist.draw_channel_list_list();
-    }).fail( function() {
-        // TODO improve
-        display_popup(screen_props, "Getting channel lists failed, please refresh");
-    });
+    make_api_request("get_channel_lists", {"method": "GET"},
+        screen_props, false,
+        function(data_str) {
+            channellistlist.channel_list_list = JSON.parse(data_str);
+            channellistlist.draw_channel_list_list();
+        },
+        function() {
+            // TODO improve
+            display_popup(screen_props, "Getting channel lists failed, please refresh");
+        }
+    );
 }
 
 ChannelListList.prototype.draw = function (draw_area) {
@@ -413,13 +436,18 @@ ChannelListList.prototype.draw_channel_list_list = function () {
                 "listname": $("#new_channel_list_name").val(),
             };
             channel_list_list.channel_list_list.push(data["listname"]);
-            $.ajax( get_api_url("create_channel_list"),
-                get_api_properties({"method": "POST", "data": data})
-            ).done( function() {
-                alert("Channel list created."); 
-            }).fail( function() {
-                alert("Fail");
-            });
+            make_api_request("create_channel_list",
+                {"method": "POST", "data": data}, 
+                channel_list_list.screen_props, true,
+                function() {
+                    //display("Channel list created.");
+                    // Nothing required
+                },
+                function() {
+                    display_popup(channel_list_list.screen_props,
+                        "Creating the channel list failed.  Please refresh.");
+                }
+            );
             channel_list_list.draw_channel_list_list();
         });
 
@@ -436,13 +464,18 @@ ChannelListList.prototype.draw_channel_list_list = function () {
                 "listname": channel_list_list.currently_selected.channel_name,
             };
             console.log(data);
-            $.ajax( get_api_url("set_active_channel"),
-                get_api_properties({"method": "POST", "data": data})
-            ).done( function() {
-                alert("Active channel set."); 
-            }).fail( function() {
-                alert("Fail");
-            });
+            make_api_request("set_active_channel",
+                {"method": "POST", "data": data},
+                channel_list_list.screen_props, true,
+                function() {
+                    display_popup(channel_list_list.screen_props,
+                        "Active channel set."); 
+                },
+                function() {
+                    display_popup(channel_list_list.screen_props,
+                        "Setting the active channel failed.  Please refresh.");
+                }
+            );
         });
     new_channel_list_area.append(set_active_channel_list_button);
 
@@ -486,18 +519,23 @@ ChannelList.prototype.draw = function (draw_area) {
 
 ChannelList.prototype.get_channel_list_from_server = function () {
     let channellist = this;
-    $.ajax( get_api_url("get_channel_list?list_name="+this.channel_name),
-        get_api_properties({"method": "GET"})
-    ).done( function(data_str) {
-        channellist.channel_list = JSON.parse(data_str);
-        channellist.draw_channel_list();
-    }).fail( function() {
-        // TODO improve
-        alert("Getting channel list failed, please refresh");
-    });
+    make_api_request(
+        "get_channel_list?list_name="+this.channel_name,
+        {"method": "GET"}, channellist.screen_props, false,
+        function(data_str) {
+            channellist.channel_list = JSON.parse(data_str);
+            channellist.draw_channel_list();
+        },
+        function() {
+            // TODO improve
+            display_popup(channellist.screen_props,
+                "Getting channel list failed.  Please refresh.");
+        }
+    );
 }
 
 ChannelList.prototype.put_channel_list_to_server = function() {
+    let channellist = this;
     const to_strip = this.ui_only_entry_props;
 
     let strip_ui_specific = function(entry) {
@@ -512,19 +550,21 @@ ChannelList.prototype.put_channel_list_to_server = function() {
         return new_ent;
     };
 
-    let channellist = this;
     let list_dat = {
         "listname": this.channel_name,
         "listdata": JSON.stringify(strip_ui_specific(this.channel_list)),
     };
-    $.ajax( get_api_url("set_channel_list"),
-        get_api_properties({"method": "POST", "data": list_dat})
-    ).done( function(data_str) {
-        console.log("Successful update");
-    }).fail( function() {
-        // TODO improve
-        alert("Updating channel list failed, please refresh");
-    });
+    make_api_request("set_channel_list", {"method": "POST", "data": list_dat},
+        channellist.screen_props, false,
+        function(data_str) {
+            console.log("Successful update");
+        },
+        function() {
+            // TODO improve
+            display_popup(channellist.screen_props,
+                "Updating channel list failed.  Please refresh.");
+        }
+    );
 }
 
 let sublist_dialog_content = function(cur_entry=undefined) {
@@ -859,14 +899,17 @@ ChannelList.prototype.add_video = function (video_name, imgurl, vidurl, videncty
 }
 
 function validate_session_or_login_screen(screen_props) {
-    $.ajax( get_api_url("validate_session_fe"),
-        get_api_properties({"method": "GET"})
-    ).done( function() {
-        // Do nothing - we're still valid
-    }).fail( function() {
-        let login_screen = new LoginScreen();
-        login_screen.draw(screen_props);
-    });
+    make_api_request("validate_session_fe", {"method": "GET"},
+        screen_props, false,
+        function() {
+            // Do nothing - we're still valid
+        },
+        function() {
+            window.history.pushState("", "", "/");
+            let login_screen = new LoginScreen();
+            login_screen.draw(screen_props);
+        }
+    );
 }
 
 function get_api_url(tail) {
@@ -909,4 +952,33 @@ function display_popup(screen_props, content, after_close = function(){}) {
 function close_popup(screen_props, after_close = function(){}) {
     screen_props.pops_back.addClass("notdisplayed");
     after_close();
+}
+
+function disp_spinner(screen_props) {
+    screen_props.spin_back.removeClass("notdisplayed");
+}
+
+function hide_spinner(screen_props) {
+    screen_props.spin_back.addClass("notdisplayed");
+}
+
+function make_api_request(urlpart, api_props, screen_props, show_spinner,
+    done_func, fail_func)
+{
+    let surround = function (inner_func) {
+        return function() {
+            hide_spinner(screen_props);
+            inner_func();
+        };
+    };
+    let actual_done = show_spinner ? surround(done_func) : done_func;
+    let actual_fail = show_spinner ? surround(fail_func) : fail_func;
+
+    if( show_spinner ) {
+        disp_spinner(screen_props);
+    }
+
+    $.ajax( get_api_url(urlpart), get_api_properties(api_props) )
+    .done(actual_done)
+    .fail(actual_fail);
 }
