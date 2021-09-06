@@ -1,8 +1,12 @@
 ## Building
 
-### CSS
+### Frontend
 
-Install sass by running `npm install sass` in the source directory.  Then run `make website`.
+Install sass by running `npm install sass` in the frontend directory.  Then run `make` in the frontend directory.
+
+### Backend
+
+
 
 ## Credits
 

@@ -31,7 +31,9 @@ services:
         secrets:
             - db_password
     channel_builder:
-        build: .
+        build:
+            context: ..
+            dockerfile: docker/Dockerfile-production
         restart: always
         environment:
             POSTGRES_PASSWORD_FILE: /run/secrets/db_password
