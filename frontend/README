@@ -1,0 +1,1 @@
+Install sass with npm, using `npm install sass` in this directory.  Then you can use make to rebuild the css.

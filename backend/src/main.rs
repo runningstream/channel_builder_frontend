@@ -1117,13 +1117,13 @@ mod api {
         -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
     {
         warp::path::end()
-            .and(warp::fs::file("static_files/index.html"))
+            .and(warp::fs::file("frontend/content/index.html"))
     }
 
     fn serve_static_files()
         -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
     {
-        warp::fs::dir("static_files")
+        warp::fs::dir("frontend/content")
     }
     */
 
