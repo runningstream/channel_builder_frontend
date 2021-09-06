@@ -1905,21 +1905,23 @@ mod helpers {
         RetriesExhausted,
     }
 
-    pub fn retry_on_err<F: Fn() -> Result<T, U>, T, U: Debug>
-        ( count: u32, sleep_len: Duration, func: F) -> Result<T, RetryErr>
+    /// Recursively retry a function call count times, sleeping between each.
+    pub fn retry_on_err
+        <FUNC: Fn() -> Result<RETTYPE, ERRTYPE>, 
+            RETTYPE, ERRTYPE: Debug>
+        ( count: u32, sleep_len: Duration, func: FUNC)
+        -> Result<RETTYPE, RetryErr>
     {
         if count <= 0 {
             println!("Retries exhausted");
             return Err(RetryErr::RetriesExhausted);
         }
-        match func() {
-            Ok(val) => Ok(val),
-            Err(err) => {
-                println!("Error with {} retries remaining: {:?}", count - 1, err);
-                sleep(sleep_len);
-                retry_on_err(count - 1, sleep_len, func)
-            },
-        }
+
+        func().or_else( |err| {
+            println!("Error with {} retries remaining: {:?}", count - 1, err);
+            sleep(sleep_len);
+            retry_on_err(count - 1, sleep_len, func)
+        })
     }
 
 
