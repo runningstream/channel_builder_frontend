@@ -34,10 +34,12 @@ pub enum RetryErr {
 
 /// Recursively retry a function call count times, sleeping between each.
 pub fn retry_on_err
-    <FUNC: Fn() -> Result<RETTYPE, ERRTYPE>, 
-        RETTYPE, ERRTYPE: Debug>
+    <FUNC, RETTYPE, ERRTYPE>
     ( count: u32, sleep_len: Duration, func: FUNC)
     -> Result<RETTYPE, RetryErr>
+where
+    FUNC: Fn() -> Result<RETTYPE, ERRTYPE>, 
+    ERRTYPE: Debug,
 {
     if count <= 0 {
         println!("Retries exhausted");
@@ -73,6 +75,7 @@ pub fn build_xml(json: Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
 
     #[test]
     fn retry_fail() {
@@ -84,10 +87,44 @@ mod tests {
     }
 
     #[test]
-    fn retry_noretries() {
+    fn retry_no_retries() {
         fn succeed() -> Result<u32, ()> { Ok(4) }
 
         let result = retry_on_err(0, Duration::new(0,100), succeed);
+        let expected = Err(RetryErr::RetriesExhausted);
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn retry_4_retries_4_needed() {
+        let count: Cell<u32> = Cell::new(0);
+        let succeed = || {
+            count.set(count.get() + 1);
+            if count.get() >= 4 {
+                Ok(count.get())
+            } else {
+                Err(())
+            }
+        };
+
+        let result = retry_on_err(4, Duration::new(0,100), succeed);
+        let expected = Ok(4);
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn retry_3_retries_4_needed() {
+        let count: Cell<u32> = Cell::new(0);
+        let succeed = || {
+            count.set(count.get() + 1);
+            if count.get() >= 4 {
+                Ok(count.get())
+            } else {
+                Err(())
+            }
+        };
+
+        let result = retry_on_err(3, Duration::new(0,100), succeed);
         let expected = Err(RetryErr::RetriesExhausted);
         assert_eq!(expected, result);
     }
@@ -98,6 +135,22 @@ mod tests {
 
         let result = retry_on_err(1, Duration::new(0,100), succeed);
         let expected = Ok(4);
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn xml_mixed() {
+        let json_input = Value::Array(
+            vec![
+                Value::Number(4.into()),
+                Value::Number(5.into()),
+                Value::String("Testing!".into()),
+                Value::Null,
+                Value::Bool(true),
+            ],
+        );
+        let result = build_xml(json_input);
+        let expected = "<array_elem>4</array_elem><array_elem>5</array_elem><array_elem>Testing!</array_elem><array_elem></array_elem><array_elem>true</array_elem>";
         assert_eq!(expected, result);
     }
 }
