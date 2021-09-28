@@ -6,15 +6,15 @@ use warp::http::StatusCode;
 use warp::{reject, Reply, Rejection};
 
 
-#[derive(Debug)]                                                                           
+#[derive(Debug)]
 pub enum Rejections {
-    // User-caused problems                                                                
+    // User-caused problems
     InvalidUserLookup, InvalidUserNonValidated,
     InvalidPassword, InvalidSession, InvalidEmailAddr,
     InvalidValidationCode, InvalidOriginOrReferer,
-    // System Problems                                                                     
-    ErrorInternal(String)                                                                  
-}                                                                                          
+    // System Problems
+    ErrorInternal(String)
+}
 
 impl reject::Reject for Rejections {}
 
