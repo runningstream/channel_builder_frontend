@@ -3,38 +3,36 @@ use helpers::SessType;
 use db::{Action, Response};
 use rand::Rng;
 use warp::http::StatusCode;
-use warp::reject;
+use warp::{reject, Reply, Rejection};
 
 
-#[derive(Debug)]                                                                                                                                                                               
-pub enum Rejections {                                                                                                                                                                              
-    // User-caused problems                                                                                                                                                                    
-    InvalidUserLookup, InvalidUserNonValidated,                                                                                                                                                
-    InvalidPassword, InvalidSession, InvalidEmailAddr,                                                                                                                                         
-    InvalidValidationCode, InvalidOriginOrReferer,                                                                                                                                             
-                                                                                                                                                                                               
-    // System Problems                                                                                                                                                                         
-    ErrorInternal(String)                                                                                                                                                                      
-}                                                                                                                                                                                              
-                                                                                                                                                                                               
+#[derive(Debug)]                                                                           
+pub enum Rejections {
+    // User-caused problems                                                                
+    InvalidUserLookup, InvalidUserNonValidated,
+    InvalidPassword, InvalidSession, InvalidEmailAddr,
+    InvalidValidationCode, InvalidOriginOrReferer,
+    // System Problems                                                                     
+    ErrorInternal(String)                                                                  
+}                                                                                          
+
 impl reject::Reject for Rejections {}
 
-
 pub async fn authenticate_ro(db: db::Db, form_dat: models::AuthForm)
-    -> Result<impl warp::Reply, warp::Rejection>
+    -> Result<impl Reply, Rejection>
 {
     println!("Trying to auth roku");
     authenticate_gen(SessType::Roku, db, form_dat).await
 }
 
 pub async fn authenticate_fe(db: db::Db, form_dat: models::AuthForm)
-    -> Result<impl warp::Reply, warp::Rejection>
+    -> Result<impl Reply, Rejection>
 {
     authenticate_gen(SessType::Frontend, db, form_dat).await
 }
 
 async fn authenticate_gen(sess_type: SessType, db: db::Db, form_dat: models::AuthForm)
-    -> Result<impl warp::Reply, warp::Rejection>
+    -> Result<impl Reply, Rejection>
 {
     let (pass_hash, hash_ver, valid_status) = 
         match db.please(Action::GetUserPassHash {
@@ -109,7 +107,7 @@ async fn authenticate_gen(sess_type: SessType, db: db::Db, form_dat: models::Aut
 
 pub async fn create_account(db: db::Db, email_inst: email::Email,
         form_dat: models::CreateAcctForm)
-    -> Result<impl warp::Reply, warp::Rejection>
+    -> Result<impl Reply, Rejection>
 {
     // Fail early if the username is invalid
     match email::parse_addr(&form_dat.username) {
@@ -193,7 +191,7 @@ pub async fn create_account(db: db::Db, email_inst: email::Email,
 
 pub async fn validate_account(db: db::Db,
     opts: models::ValidateAccountRequest)
-    -> Result<impl warp::Reply, warp::Rejection>
+    -> Result<impl Reply, Rejection>
 {
     match db.please(Action::ValidateAccount { val_code: opts.val_code }).await {
         Ok(Response::Bool(true)) => Ok(StatusCode::OK),
@@ -212,29 +210,51 @@ pub async fn validate_account(db: db::Db,
 }
 
 pub async fn validate_session_fe(db: db::Db, sess_info: (String, i32))
-    -> Result<impl warp::Reply, warp::Rejection>
+    -> Result<impl Reply, Rejection>
 {
     validate_session(SessType::Frontend, db, sess_info).await
 }
 
 pub async fn validate_session_ro(db: db::Db, sess_info: (String, i32))
-    -> Result<impl warp::Reply, warp::Rejection>
+    -> Result<impl Reply, Rejection>
 {
     validate_session(SessType::Roku, db, sess_info).await
 }
 
 async fn validate_session(_sess_type: SessType, _db: db::Db,
     _sess_info: (String, i32))
-    -> Result<impl warp::Reply, warp::Rejection>
+    -> Result<impl Reply, Rejection>
 {
     // If we can get to here, we're ok
-    // TODO - what's the right response?
-    //Ok(warp::reply::html("Valid")) // For some reason, Rust won't compile if I use this
     Ok(StatusCode::OK)
 }
 
+pub async fn retrieve_session_dat(session_id: String, db: db::Db, sess_type: SessType)
+    -> Result<(String, i32), Rejection>
+{
+    match db.please(Action::ValidateSessKey {
+        sess_type: sess_type,
+        sess_key: session_id.clone(),
+    }).await {
+        Ok(Response::ValidatedKey(true, user_id)) =>
+            Ok((session_id, user_id)),
+        Ok(Response::ValidatedKey(false, _)) =>
+            Err(reject::custom(Rejections::InvalidSession)),
+        Ok(_) => {
+            println!(
+                "Invalid response when validating session"
+            );
+            Err(reject::custom(Rejections::InvalidSession))
+        },
+        Err(err) => {
+            println!("Error validating session: {}", err);
+            Err(reject::custom(Rejections::InvalidSession))
+        },
+    }
+}
+
 pub async fn logout_session_fe(db: db::Db, sess_info: (String, i32))
-    -> Result<impl warp::Reply, warp::Rejection>
+    -> Result<impl Reply, Rejection>
 {
     let (sess_key, _user_id) = sess_info;
 
@@ -252,7 +272,7 @@ pub async fn logout_session_fe(db: db::Db, sess_info: (String, i32))
 }
 
 pub async fn get_channel_lists(db: db::Db, sess_info: (String, i32))
-    -> Result<impl warp::Reply, warp::Rejection>
+    -> Result<impl Reply, Rejection>
 {
     let (_sess_key, user_id) = sess_info;
 
@@ -273,7 +293,7 @@ pub async fn get_channel_lists(db: db::Db, sess_info: (String, i32))
 
 pub async fn get_channel_list(db: db::Db, sess_info: (String, i32), 
     opts: models::GetChannelListQuery)
-    -> Result<impl warp::Reply, warp::Rejection>
+    -> Result<impl Reply, Rejection>
 {
     let (_sess_key, user_id) = sess_info;
 
@@ -294,7 +314,7 @@ pub async fn get_channel_list(db: db::Db, sess_info: (String, i32),
 }
 
 pub async fn get_channel_xml_ro(db: db::Db, sess_info: (String, i32)) 
-    -> Result<impl warp::Reply, warp::Rejection>
+    -> Result<impl Reply, Rejection>
 {
     let (_sess_key, user_id) = sess_info;
 
@@ -329,7 +349,7 @@ pub async fn get_channel_xml_ro(db: db::Db, sess_info: (String, i32))
 
 pub async fn set_channel_list(db: db::Db, sess_info: (String, i32), 
     form_dat: models::SetChannelListForm)
-    -> Result<impl warp::Reply, warp::Rejection>
+    -> Result<impl Reply, Rejection>
 {
     let (_sess_key, user_id) = sess_info;
 
@@ -351,7 +371,7 @@ pub async fn set_channel_list(db: db::Db, sess_info: (String, i32),
 
 pub async fn create_channel_list(db: db::Db, sess_info: (String, i32), 
     form_dat: models::CreateChannelListForm)
-    -> Result<impl warp::Reply, warp::Rejection>
+    -> Result<impl Reply, Rejection>
 {
     let (_sess_key, user_id) = sess_info;
 
@@ -369,7 +389,7 @@ pub async fn create_channel_list(db: db::Db, sess_info: (String, i32),
 
 pub async fn set_active_channel(db: db::Db, sess_info: (String, i32), 
     form_dat: models::SetActiveChannelForm)
-    -> Result<impl warp::Reply, warp::Rejection>
+    -> Result<impl Reply, Rejection>
 {
     let (_sess_key, user_id) = sess_info;
 
@@ -383,6 +403,61 @@ pub async fn set_active_channel(db: db::Db, sess_info: (String, i32),
                 format!("SetActiveChannel Error: {:?}", err)
             ))),
     }
+}
+
+pub async fn validate_origin_or_referer(source: String, cors_origin: String)
+    -> Result<(), Rejection>
+{
+    if source.starts_with(&cors_origin) {
+        Ok(())
+    } else {
+        Err(reject::custom(Rejections::InvalidOriginOrReferer))
+    }
+}
+
+pub async fn handle_rejection(err: Rejection)
+    -> Result<impl Reply, Rejection>
+{
+    let code;
+    let message;
+
+    // TODO add in more error handling?
+
+    if err.is_not_found() {
+        code = StatusCode::NOT_FOUND;
+        message = "Not Found";
+    } else {
+        match err.find() {
+            Some(Rejections::InvalidUserLookup) |
+            Some(Rejections::InvalidUserNonValidated) |
+            Some(Rejections::InvalidPassword) |
+            Some(Rejections::InvalidSession) |
+            Some(Rejections::InvalidEmailAddr) |
+            Some(Rejections::InvalidValidationCode)
+            => {
+                code = StatusCode::FORBIDDEN;
+                message = "Forbidden";
+            },
+            Some(Rejections::InvalidOriginOrReferer)
+            => {
+                code = StatusCode::BAD_REQUEST;
+                message = "Bad Request";
+            },
+            Some(Rejections::ErrorInternal(content))
+            => {
+                print!("ErrorInternal: {}", content);
+                code = StatusCode::INTERNAL_SERVER_ERROR;
+                message = "Internal Server Error";
+            },
+            other => {
+                print!("Unhandled error on request: {:?}", other);
+                code = StatusCode::INTERNAL_SERVER_ERROR;
+                message = "Internal Server Error";
+            },
+        }
+    }
+
+    Ok(warp::reply::with_status(message.to_string(), code))
 }
 
 fn gen_large_rand_str() -> String {
