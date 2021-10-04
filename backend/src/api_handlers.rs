@@ -1,6 +1,8 @@
+use std::{error, fmt};
 use crate::{db, email, helpers, models, password_hash_version};
 use helpers::SessType;
-use db::{Action, Response};
+use db::{Action, Response, DBError};
+use password_hash_version::PWHashError;
 use rand::Rng;
 use warp::http::StatusCode;
 use warp::{reject, Reply, Rejection};
@@ -13,15 +15,58 @@ pub enum Rejections {
     InvalidPassword, InvalidSession, InvalidEmailAddr,
     InvalidValidationCode, InvalidOriginOrReferer,
     // System Problems
-    ErrorInternal(String)
+    ErrorInternal(String), ErrorFromPWHash(PWHashError),
+
+    // DB error
+    ErrorFromDB(DBError), ErrorDBAPI(String, String)
 }
 
 impl reject::Reject for Rejections {}
 
+impl fmt::Display for Rejections {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Rejections error: ")?;
+
+        match &*self {
+            Rejections::ErrorInternal(str) => write!(f, "internal: {}", str),
+            Rejections::ErrorFromPWHash(err) => write!(f, "password hash: {}", err),
+            Rejections::ErrorFromDB(err) => write!(f, "db: {}", err),
+            Rejections::ErrorDBAPI(loc, retval) => write!(f, "db api {}: {}", loc, retval),
+            other => write!(f, "{:?}", other),
+        }
+    }
+}
+
+impl error::Error for Rejections {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match *self {
+            Rejections::ErrorFromDB(ref err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+impl From<DBError> for Rejections {
+    fn from(err: DBError) -> Rejections {
+        Rejections::ErrorFromDB(err)
+    }
+}
+
+impl From<PWHashError> for Rejections {
+    fn from(err: PWHashError) -> Rejections {
+        Rejections::ErrorFromPWHash(err)
+    }
+}
+
+impl Rejections {
+    fn db_api_err(api: &str, resp: impl std::fmt::Debug) -> Rejections {
+        Rejections::ErrorDBAPI(api.into(), format!("{:?}", resp))
+    }
+}
+
 pub async fn authenticate_ro(db: db::Db, form_dat: models::AuthForm)
     -> Result<impl Reply, Rejection>
 {
-    println!("Trying to auth roku");
     authenticate_gen(SessType::Roku, db, form_dat).await
 }
 
@@ -39,19 +84,14 @@ async fn authenticate_gen(sess_type: SessType, db: db::Db, form_dat: models::Aut
             user: form_dat.username.clone(),
         }).await {
             Ok(Response::UserPassHash(pass_hash, hash_ver, valid_status)) => 
-                (pass_hash, hash_ver, valid_status),
-            Ok(resp) => {
-                return Err(reject::custom(Rejections::ErrorInternal(
-                    format!("GetUserPassHash response: {:?}", resp)
-                )));
-            },
-            Err(_) => {
-                return Err(reject::custom(Rejections::InvalidUserLookup));
-            },
-        };
+                Ok((pass_hash, hash_ver, valid_status)),
+            Ok(resp) => Err(Rejections::db_api_err("GetUserPassHash", resp)),
+            Err(err) => Err(Rejections::from(err)),
+        }?;
+
 
     if !valid_status {
-        return Err(reject::custom(Rejections::InvalidUserNonValidated));
+        return Err(Rejections::InvalidUserNonValidated.into());
     }
 
     let sess_key = gen_large_rand_str();
@@ -61,19 +101,12 @@ async fn authenticate_gen(sess_type: SessType, db: db::Db, form_dat: models::Aut
         sess_type: sess_type.clone(),
         sess_key: sess_key.clone(),
     }).await {
-        Ok(_) => {},
-        Err(err) => {
-            return Err(reject::custom(
-                Rejections::ErrorInternal(
-                    format!("AddSessKey response: {:?}",err)
-                )
-            ))
-        },
-    };
+        Ok(Response::Empty) => Ok(()),
+        Ok(resp) => Err(Rejections::db_api_err("AddSessKey", resp)),
+        Err(err) => Err(Rejections::from(err)),
+    }?;
 
     let max_age = sess_type.get_max_age();
-
-    //println!("Authenticated {:?}: {:?} key {}", sess_type, form_dat, sess_key);
 
     // Add the session key as content if this is a roku auth
     // TODO: make it so we don't have to do that anymore...
@@ -96,12 +129,8 @@ async fn authenticate_gen(sess_type: SessType, db: db::Db, form_dat: models::Aut
                     helpers::SESSION_COOKIE_NAME, sess_key,
                     max_age)
             )),
-        Ok(false) =>
-            Err(reject::custom(Rejections::InvalidPassword)),
-        Err(err) =>
-            Err(reject::custom(Rejections::ErrorInternal(
-                format!("Validating password: {:?}", err)
-            ))),
+        Ok(false) => Err(Rejections::InvalidPassword.into()),
+        Err(err) => Err(Rejections::from(err).into())
     }
 }
 
@@ -110,12 +139,8 @@ pub async fn create_account(db: db::Db, email_inst: email::Email,
     -> Result<impl Reply, Rejection>
 {
     // Fail early if the username is invalid
-    match email::parse_addr(&form_dat.username) {
-        Ok(_) => {},
-        Err(_) => {
-            return Err(reject::custom(Rejections::InvalidEmailAddr));
-        }
-    };
+    email::parse_addr(&form_dat.username)
+        .map_err(|_| {Rejections::InvalidEmailAddr})?;
 
     // TODO: handle properly when the rand number is already in the DB
     let reg_key = gen_large_rand_str();
@@ -125,13 +150,9 @@ pub async fn create_account(db: db::Db, email_inst: email::Email,
     let pw_hash = match password_hash_version::hash_pw(
         &form_dat.username, &form_dat.password)
     {
-        Ok(val) => val,
-        Err(err) => {
-            return Err(reject::custom(Rejections::ErrorInternal(
-                format!("Error hashing password: {}", err)
-            )));
-        },
-    };
+        Ok(val) => Ok(val),
+        Err(err) => Err(Rejections::from(err)),
+    }?;
 
     let pw_hash_ver = password_hash_version::get_pw_ver();
 
@@ -141,18 +162,10 @@ pub async fn create_account(db: db::Db, email_inst: email::Email,
         pass_hash_ver: pw_hash_ver,
         reg_key: reg_key.clone(),
     }).await {
-        Ok(Response::UserID(user_id)) => user_id,
-        Ok(resp) => {
-            return Err(reject::custom(Rejections::ErrorInternal(
-                format!("AddUser response: {:?}", resp)
-            )));
-        },
-        Err(err) => {
-            return Err(reject::custom(Rejections::ErrorInternal(
-                format!("AddUser error: {:?}", err)
-            )));
-        },
-    };
+        Ok(Response::UserID(user_id)) => Ok(user_id),
+        Ok(resp) => Err(Rejections::db_api_err("AddUser", resp)),
+        Err(err) => Err(Rejections::from(err)),
+    }?;
 
     email_inst.please(email::Action::SendRegAcct(
         email::RegisterData {
@@ -195,16 +208,8 @@ pub async fn validate_account(db: db::Db,
 {
     match db.please(Action::ValidateAccount { val_code: opts.val_code }).await {
         Ok(Response::Bool(true)) => Ok(StatusCode::OK),
-        Ok(resp) =>
-            Err(reject::custom(Rejections::ErrorInternal(
-                format!("ValidateAccount Response {:?}", resp)
-            ))),
-        Err(db::DBError::InvalidValidationCode) =>
-            Err(reject::custom(Rejections::InvalidValidationCode)),
-        Err(err) =>
-            Err(reject::custom(Rejections::ErrorInternal(
-                format!("ValidateAccount Error {:?}", err)
-            ))),
+        Ok(resp) => Err(Rejections::db_api_err("ValidateAccount", resp).into()),
+        Err(err) => Err(Rejections::from(err).into()),
     }
     
 }
@@ -239,17 +244,9 @@ pub async fn retrieve_session_dat(session_id: String, db: db::Db, sess_type: Ses
         Ok(Response::ValidatedKey(true, user_id)) =>
             Ok((session_id, user_id)),
         Ok(Response::ValidatedKey(false, _)) =>
-            Err(reject::custom(Rejections::InvalidSession)),
-        Ok(_) => {
-            println!(
-                "Invalid response when validating session"
-            );
-            Err(reject::custom(Rejections::InvalidSession))
-        },
-        Err(err) => {
-            println!("Error validating session: {}", err);
-            Err(reject::custom(Rejections::InvalidSession))
-        },
+            Err(Rejections::InvalidSession.into()),
+        Ok(resp) => Err(Rejections::db_api_err("ValidateSessKey", resp).into()),
+        Err(err) => Err(Rejections::from(err).into()),
     }
 }
 
@@ -258,16 +255,13 @@ pub async fn logout_session_fe(db: db::Db, sess_info: (String, i32))
 {
     let (sess_key, _user_id) = sess_info;
 
-    // TODO - what's the right response?
     match db.please(Action::LogoutSessKey {
         sess_type: SessType::Frontend,
         sess_key: sess_key,
     }).await {
-        Ok(_) => Ok(StatusCode::OK),
-        Err(err) => 
-            Err(reject::custom(Rejections::ErrorInternal(
-                format!("LogoutSessKey Error: {:?}", err)
-            ))),
+        Ok(Response::Empty) => Ok(StatusCode::OK),
+        Ok(resp) => Err(Rejections::db_api_err("LogoutSessKey", resp).into()),
+        Err(err) => Err(Rejections::from(err).into()),
     }
 }
 
@@ -280,14 +274,8 @@ pub async fn get_channel_lists(db: db::Db, sess_info: (String, i32))
         user_id: user_id,
     }).await {
         Ok(Response::StringResp(val)) => Ok(warp::reply::html(val)),
-        Ok(resp) =>
-            Err(reject::custom(Rejections::ErrorInternal(
-                format!("GetChannelLists Response: {:?}", resp)
-            ))),
-        Err(err) => 
-            Err(reject::custom(Rejections::ErrorInternal(
-                format!("GetChannelLists Error: {:?}", err)
-            ))),
+        Ok(resp) => Err(Rejections::db_api_err("GetChannelLists", resp).into()),
+        Err(err) => Err(Rejections::from(err).into()),
     }
 }
 
@@ -302,14 +290,8 @@ pub async fn get_channel_list(db: db::Db, sess_info: (String, i32),
         list_name: opts.list_name,
     }).await {
         Ok(Response::StringResp(val)) => Ok(warp::reply::html(val)),
-        Ok(resp) =>
-            Err(reject::custom(Rejections::ErrorInternal(
-                format!("GetChannelList Response: {:?}", resp)
-            ))),
-        Err(err) =>
-            Err(reject::custom(Rejections::ErrorInternal(
-                format!("GetChannelList Error: {:?}", err)
-            ))),
+        Ok(resp) => Err(Rejections::db_api_err("GetChannelList", resp).into()),
+        Err(err) => Err(Rejections::from(err).into()),
     }
 }
 
@@ -321,27 +303,15 @@ pub async fn get_channel_xml_ro(db: db::Db, sess_info: (String, i32))
     let channel_list = match db.please(Action::GetActiveChannel {
         user_id: user_id,
     }).await {
-        Ok(Response::StringResp(val)) => val,
-        Ok(resp) => {
-            return Err(reject::custom(Rejections::ErrorInternal(
-                format!("GetActiveChannel Response: {:?}", resp)
-            )));
-        },
-        Err(err) => {
-            return Err(reject::custom(Rejections::ErrorInternal(
-                format!("GetActiveChannel Error: {:?}", err)
-            )));
-        },
-    };
+        Ok(Response::StringResp(val)) => Ok(val),
+        Ok(resp) => Err(Rejections::db_api_err("GetActiveChannel", resp)),
+        Err(err) => Err(Rejections::from(err)),
+    }?;
 
     let json: serde_json::Value = match serde_json::from_str(&channel_list) {
-        Ok(val) => val,
-        Err(err) => {
-            return Err(reject::custom(Rejections::ErrorInternal(
-                format!("serde JSON Error: {:?}", err)
-            )));
-        },
-    };
+        Ok(val) => Ok(val),
+        Err(err) => Err(Rejections::ErrorInternal(format!("serde JSON Error: {}", err))),
+    }?;
 
     let xml_str1 = helpers::build_xml(json.clone());
     Ok(warp::reply::html(xml_str1))
@@ -361,11 +331,9 @@ pub async fn set_channel_list(db: db::Db, sess_info: (String, i32),
         list_name: form_dat.listname,
         list_data: form_dat.listdata,
     }).await {
-        Ok(_) => Ok(StatusCode::OK),
-        Err(err) =>
-            Err(reject::custom(Rejections::ErrorInternal(
-                format!("SetChannelList Error: {:?}", err)
-            ))),
+        Ok(Response::Empty) => Ok(StatusCode::OK),
+        Ok(resp) => Err(Rejections::db_api_err("SetChannelList", resp).into()),
+        Err(err) => Err(Rejections::from(err).into()),
     }
 }
 
@@ -379,11 +347,9 @@ pub async fn create_channel_list(db: db::Db, sess_info: (String, i32),
         user_id: user_id,
         list_name: form_dat.listname,
     }).await {
-        Ok(_) => Ok(StatusCode::OK),
-        Err(err) =>
-            Err(reject::custom(Rejections::ErrorInternal(
-                format!("CreateChannelList Error: {:?}", err)
-            ))),
+        Ok(Response::Empty) => Ok(StatusCode::OK),
+        Ok(resp) => Err(Rejections::db_api_err("CreateChannelList", resp).into()),
+        Err(err) => Err(Rejections::from(err).into()),
     }
 }
 
@@ -397,11 +363,9 @@ pub async fn set_active_channel(db: db::Db, sess_info: (String, i32),
         user_id: user_id,
         list_name: form_dat.listname,
     }).await {
-        Ok(_) => Ok(StatusCode::OK),
-        Err(err) =>
-            Err(reject::custom(Rejections::ErrorInternal(
-                format!("SetActiveChannel Error: {:?}", err)
-            ))),
+        Ok(Response::Empty) => Ok(StatusCode::OK),
+        Ok(resp) => Err(Rejections::db_api_err("SetActiveChannel", resp).into()),
+        Err(err) => Err(Rejections::from(err).into()),
     }
 }
 
@@ -445,14 +409,20 @@ pub async fn handle_rejection(err: Rejection)
             },
             Some(Rejections::ErrorInternal(content))
             => {
-                print!("ErrorInternal: {}", content);
+                println!("ErrorInternal: {}", content);
                 code = StatusCode::INTERNAL_SERVER_ERROR;
-                message = "Internal Server Error";
+                message = "Internal Server Error: INTERNAL";
+            },
+            Some(Rejections::ErrorFromDB(dberr))
+            => {
+                println!("ErrorFromDB: {}", dberr);
+                code = StatusCode::INTERNAL_SERVER_ERROR;
+                message = "Internal Server Error: DB";
             },
             other => {
-                print!("Unhandled error on request: {:?}", other);
+                println!("Unhandled error on request: {:?}", other);
                 code = StatusCode::INTERNAL_SERVER_ERROR;
-                message = "Internal Server Error";
+                message = "Internal Server Error: OTHER";
             },
         }
     }
@@ -465,4 +435,36 @@ fn gen_large_rand_str() -> String {
     let reg_key_p1 = rand::thread_rng().gen::<u128>();
     let reg_key_p2 = rand::thread_rng().gen::<u128>();
     format!("{:032X}{:032X}", reg_key_p1, reg_key_p2)
+}
+
+#[cfg(test)]
+mod tests{
+    use super::*;
+
+    /// Test out handle_rejection's properly handling DBError results
+    /// Also validates ability to transform DBError type into Rejections,
+    /// and Rejections into Rejection
+    #[tokio::test]
+    async fn try_handle_rejection_dberror() {
+        let rejection: Rejection = Rejections::from(DBError::InvalidUsername).into();
+        let result = handle_rejection(rejection).await.unwrap();
+        let expected = Ok(
+            warp::reply::with_status("Internal Server Error: DB",
+                StatusCode::INTERNAL_SERVER_ERROR)
+        );
+
+        assert_eq!(
+            format!("{:?}", expected.into_response()),
+            format!("{:?}", result.into_response())
+        );
+    }
+
+    #[test]
+    fn print_error() {
+        let reject1 = Rejections::from(DBError::InvalidUsername);
+        let reject2 = Rejections::db_api_err("ValidateAccount", Response::Bool(false));
+
+        println!("{}", reject1);
+        println!("{}", reject2);
+    }
 }

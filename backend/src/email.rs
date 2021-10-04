@@ -11,19 +11,6 @@ use lettre::{Address, Transport};
 
 const EMAIL_PERIOD: u64 = 10; // seconds between trying to send email
 
-/*
-#[derive(Debug, Clone)]
-pub enum EmailError {
-    MessageBuildFailure, MessageSendFailure, InvalidAddress
-}
-
-impl fmt::Display for EmailError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Error {:?}", *self)
-    }
-}
-*/
-
 pub fn parse_addr(addr: &str) -> Result<Mailbox, AddressError> {
     let address: Address = addr.parse()?;
     Ok(Mailbox::new(None, address))

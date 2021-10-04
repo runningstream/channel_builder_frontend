@@ -7,7 +7,7 @@ use diesel::pg::PgConnection;
 use diesel::Connection;
 use diesel::RunQueryDsl;
 use diesel::result::Error::NotFound;
-use std::fmt;
+use std::{error, fmt};
 use std::sync::mpsc;
 use tokio::task;
 use tokio::sync::oneshot;
@@ -36,6 +36,15 @@ pub enum DBError {
 impl fmt::Display for DBError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Error: {:?}", *self)
+    }
+}
+
+// TODO - implement sources for these if/where appropriate
+impl error::Error for DBError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match *self {
+            _ => None,
+        }
     }
 }
 
