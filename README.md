@@ -1,3 +1,15 @@
+## Running
+
+### Frontend
+
+Deploy to S3 and cloudfront
+
+### Backend
+
+Use ansible to setup the server...  Then:
+
+docker-compose -f production-docker-compose.yml up -d
+
 ## Building
 
 ### Frontend
@@ -5,6 +17,7 @@
 Install sass by running `npm install sass` in the frontend directory.  Then run `make` in the frontend directory.
 
 ### Backend
+
 
 
 ## Backing Up and Restoring the Database
@@ -25,7 +38,7 @@ Now copy the restore file into the running DB container:
 
 Now login to the running DB container:
 
-`docker-compose -f testing-docker-compose.yml exec db 'bash'`
+`docker-compose -f production-docker-compose.yml exec db 'bash'`
 
 Now restore the backup:
 
