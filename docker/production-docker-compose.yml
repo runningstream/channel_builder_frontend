@@ -14,6 +14,7 @@ secrets:
         file: ./email_from.secret
 volumes:
     db_data:
+        external: true
     nginx_secrets:
 services:
     db:
@@ -31,9 +32,7 @@ services:
         secrets:
             - db_password
     channel_builder:
-        build:
-            context: ..
-            dockerfile: docker/Dockerfile-production
+        image: runningstream/channel_builder_backend
         restart: always
         environment:
             POSTGRES_PASSWORD_FILE: /run/secrets/db_password
