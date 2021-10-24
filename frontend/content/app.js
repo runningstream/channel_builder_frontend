@@ -914,9 +914,9 @@ function validate_session_or_login_screen(screen_props) {
 
 function get_api_url(tail) {
     let API_ROOT = "https://api.runningstream.cc/api/v1/";
-    if( document.location.host.includes("192.168.7.31") ) {
+    if( document.location.host.includes("192.168.86.11") ) {
         //const API_ROOT = "http://localhost:3031/api/v1/";
-        API_ROOT = "http://192.168.7.31:3031/api/v1/";
+        API_ROOT = "http://192.168.86.11:3031/api/v1/";
     }
 
     return API_ROOT + tail;

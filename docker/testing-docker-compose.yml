@@ -36,13 +36,14 @@ services:
             POSTGRES_PASSWORD_FILE: /run/secrets/db_password
             POSTGRES_HOST: "db:5432"
             CB_LISTEN: "0.0.0.0:3031"
-            FRONTEND_LOC: "http://192.168.7.31:8080"
+            FRONTEND_LOC: "http://192.168.86.11:8080"
             SMTP_SERVER_FILE: /run/secrets/smtp_server
             SMTP_PORT_FILE: /run/secrets/smtp_port
             SMTP_USERNAME_FILE: /run/secrets/smtp_username
             SMTP_PASSWORD_FILE: /run/secrets/smtp_password
             EMAIL_FROM_ADDR_FILE: /run/secrets/email_from
             RUST_BACKTRACE: 1
+            RUST_LOG: "backend"
         ports:
             - 3031:3031
         secrets:

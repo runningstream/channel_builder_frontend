@@ -33,6 +33,7 @@ pub fn build_filters(db: db::Db, email: email::Email, cors_origin: String)
         )
         .recover(api_handlers::handle_rejection)
         .with(cors)
+        .with(warp::log("backend"))
 }
 
 /*
