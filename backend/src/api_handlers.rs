@@ -149,7 +149,7 @@ pub async fn create_account(db: db::Db, email_inst: email::Email,
 
     // TODO: handle properly when the rand number is already in the DB
     let reg_key = gen_large_rand_str();
-    println!("Adding user with reg key ?val_code={}", reg_key);
+    debug!("Adding user with reg key ?val_code={}", reg_key);
 
     // Generate the password hash
     let pw_hash = match password_hash_version::hash_pw(
@@ -187,7 +187,7 @@ pub async fn create_account(db: db::Db, email_inst: email::Email,
     }).await {
         Ok(_) => true,
         Err(err) => {
-            println!("User created, error creating first channel list: {}", err);
+            warn!("User created, error creating first channel list: {}", err);
             false
         } 
     };
@@ -199,7 +199,7 @@ pub async fn create_account(db: db::Db, email_inst: email::Email,
         }).await {
             Ok(_) => {},
             Err(err) => {
-                println!("User created, error setting first channel active: {}", err)
+                warn!("User created, error setting first channel active: {}", err)
             }
         }
     }

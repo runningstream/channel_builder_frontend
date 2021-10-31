@@ -102,7 +102,7 @@ impl Db {
             &mut std::io::stdout()) 
         {
             Ok(_) => {},
-            Err(err) => println!("Error during migrations: {:?}", err),
+            Err(err) => error!("Error during migrations: {:?}", err),
         };
 
         let in_thread_data = InThreadData {
@@ -133,7 +133,7 @@ impl Db {
                 match rx.await {
                     Ok(result) => result,
                     Err(err) => {
-                        println!("Error getting result from database thread: {}", err);
+                        error!("Error getting result from database thread: {}", err);
                         Err(DBError::ThreadResponseFailure)
                     }
                 }
@@ -180,7 +180,7 @@ impl Db {
             match msg.resp.send(result) {
                 Ok(_) => {},
                 Err(_) => {
-                    println!("Failed to send database response to requestor...");
+                    error!("Failed to send database response to requestor...");
                 },
             };
         }
@@ -208,14 +208,14 @@ impl Db {
             //Ok(1) => Ok(Response::Empty), // From .execute, TODO delete
             Ok(user_ids) => {
                 if user_ids.len() != 1 {
-                    println!("Adding user returned other-than 1 row: {:?}", user_ids);
+                    warn!("Adding user returned other-than 1 row: {:?}", user_ids);
                     Err(DBError::InvalidDBResponse)
                 } else {
                     Ok(Response::UserID(user_ids[0]))
                 }
             },
             Err(err) => {
-                println!("Error {:?}", err);
+                warn!("Error {:?}", err);
                 Err(DBError::InvalidDBResponse)},
         }
     }
@@ -230,7 +230,7 @@ impl Db {
         {
             Ok(vals) => vals,
             Err(err) => {
-                println!("Error getting validation code: {}", err);
+                warn!("Error getting validation code: {}", err);
                 return Err(DBError::InvalidValidationCode);},
         };
 
@@ -241,7 +241,7 @@ impl Db {
             },
             1 => {},
             _ => {
-                println!("Error with validate account db results: {}", results.len());
+                warn!("Error with validate account db results: {}", results.len());
                 return Err(DBError::InvalidDBResponse);
             },
         };
@@ -259,10 +259,10 @@ impl Db {
         {
             Ok(1) => Ok(Response::Bool(true)),
             Ok(val) => {
-                println!("Updating status returned other-than 1: {}", val);
+                warn!("Updating status returned other-than 1: {}", val);
                 Err(DBError::InvalidDBResponse)},
             Err(err) => {
-                println!("Error {:?}", err);
+                warn!("Error {:?}", err);
                 Err(DBError::InvalidDBResponse)},
         }
     }
@@ -281,7 +281,7 @@ impl Db {
         {
             Ok(vals) => vals,
             Err(err) => {
-                println!("Error getting username: {}", err);
+                warn!("Error getting username: {}", err);
                 return Err(DBError::InvalidUsername);},
         };
 
@@ -292,7 +292,7 @@ impl Db {
             },
             1 => {},
             _ => {
-                println!(
+                warn!(
                     "Error with add session key account db results: {}",
                     results.len());
                 return Err(DBError::InvalidDBResponse);
@@ -329,10 +329,10 @@ impl Db {
         {
             Ok(1) => Ok(Response::Empty),
             Ok(val) => {
-                println!("Adding sess key other-than 1: {}", val);
+                warn!("Adding sess key other-than 1: {}", val);
                 Err(DBError::InvalidDBResponse)},
             Err(err) => {
-                println!("Error {:?}", err);
+                warn!("Error {:?}", err);
                 Err(DBError::InvalidDBResponse)},
         }
     }
@@ -349,13 +349,13 @@ impl Db {
             {
                 Ok(vals) => vals,
                 Err(err) => {
-                    println!("Error getting session key: {}", err);
+                    warn!("Error getting session key: {}", err);
                     return Err(DBError::InvalidDBResponse);
                 },
             };
             
             if results.len() != 1 {
-                println!("Error with session key db results: {}", results.len());
+                warn!("Error with session key db results: {}", results.len());
                 return Err(DBError::InvalidDBResponse);
             }
 
@@ -406,10 +406,10 @@ impl Db {
                 // Return failed session key
                 Ok(1) => Ok(Response::ValidatedKey(false, 0)),
                 Ok(val) => {
-                    println!("Updating lastusedtime returned other-than 1: {}", val);
+                    warn!("Updating lastusedtime returned other-than 1: {}", val);
                     Err(DBError::InvalidDBResponse)},
                 Err(err) => {
-                    println!("Error updating lastusedtime {:?}", err);
+                    warn!("Error updating lastusedtime {:?}", err);
                     Err(DBError::InvalidDBResponse)},
             };
         }
@@ -429,10 +429,10 @@ impl Db {
         match upd_res {
             Ok(1) => Ok(Response::ValidatedKey(true, result.userid)),
             Ok(val) => {
-                println!("Updating lastusedtime returned other-than 1: {}", val);
+                warn!("Updating lastusedtime returned other-than 1: {}", val);
                 Err(DBError::InvalidDBResponse)},
             Err(err) => {
-                println!("Error updating lastusedtime {:?}", err);
+                warn!("Error updating lastusedtime {:?}", err);
                 Err(DBError::InvalidDBResponse)},
         }
     }
@@ -455,7 +455,7 @@ impl Db {
             // Return failed session key
             Ok(_) => Ok(Response::Empty),
             Err(err) => {
-                println!("Error updating lastusedtime {:?}", err);
+                warn!("Error updating lastusedtime {:?}", err);
                 Err(DBError::InvalidDBResponse)},
         }
     }
@@ -469,12 +469,12 @@ impl Db {
         {
             Ok(vals) => vals,
             Err(err) => {
-                println!("Error getting user pass hash: {}", err);
+                warn!("Error getting user pass hash: {}", err);
                 return Err(DBError::InvalidDBResponse);},
         };
         
         if results.len() != 1 {
-            println!("Error with user pass hash db results: {}", results.len());
+            warn!("Error with user pass hash db results: {}", results.len());
             return Err(DBError::InvalidDBResponse);
         }
 
@@ -494,7 +494,7 @@ impl Db {
         {
             Ok(vals) => vals,
             Err(err) => {
-                println!("Error getting channel lists: {}", err);
+                warn!("Error getting channel lists: {}", err);
                 return Err(DBError::InvalidDBResponse);
             },
         };
@@ -506,7 +506,7 @@ impl Db {
         match serde_json::to_string(&channel_names) {
             Ok(val) => Ok(Response::StringResp(val)),
             Err(err) => {
-                println!("Error converting channel_names to JSON: {}", err);
+                warn!("Error converting channel_names to JSON: {}", err);
                 return Err(DBError::JSONConversionError);
             },
         }
@@ -524,14 +524,14 @@ impl Db {
         {
             Ok(vals) => vals,
             Err(err) => {
-                println!("Error getting channel list: {}", err);
+                warn!("Error getting channel list: {}", err);
                 return Err(DBError::InvalidDBResponse);
             },
         };
 
         // Make sure we got only one
         if results.len() != 1 {
-            println!(
+            warn!(
                 concat!("Error with channel list db results: ",
                     "user {}, list {}, result count {}"),
                 user_id, list_name, results.len()
@@ -555,14 +555,14 @@ impl Db {
         {
             Ok(1) => Ok(Response::Empty),
             Ok(val) => {
-                println!(concat!(
+                warn!(concat!(
                         "Updating channel list returned other-than 1: ",
                         "userid {} list {} count {}"),
                     user_id, list_name, val
                 );
                 Err(DBError::InvalidDBResponse)},
             Err(err) => {
-                println!(concat!("Error updating channel list ",
+                warn!(concat!("Error updating channel list ",
                         "userid {} list {} err {:?}"),
                     user_id, list_name, err
                 );
@@ -580,12 +580,12 @@ impl Db {
             .first::<db_models::QueryChannelList>(&dat.db_conn)
         {
             Ok(_) => {
-                println!("Error creating channel - already exists",);
+                info!("Error creating channel - already exists",);
                 return Err(DBError::EntryAlreadyExists);
             },
             Err(NotFound) => {},
             Err(err) => {
-                println!("Error creating channel: {}", err);
+                warn!("Error creating channel: {}", err);
                 return Err(DBError::InvalidDBResponse);
             },
         };
@@ -604,10 +604,10 @@ impl Db {
         {
             Ok(1) => Ok(Response::Empty),
             Ok(val) => {
-                println!("Adding channel returned other-than 1: {}", val);
+                warn!("Adding channel returned other-than 1: {}", val);
                 Err(DBError::InvalidDBResponse)},
             Err(err) => {
-                println!("Error {:?}", err);
+                warn!("Error {:?}", err);
                 Err(DBError::InvalidDBResponse)},
         }
     }
@@ -627,7 +627,7 @@ impl Db {
         {
             Ok(vals) => vals,
             Err(err) => {
-                println!("Error getting user pass hash: {}", err);
+                info!("Error getting user pass hash: {}", err);
                 return Err(DBError::InvalidDBResponse);},
         };
 
@@ -638,7 +638,7 @@ impl Db {
             },
             1 => {},
             _ => {
-                println!("Error with validate account db results: {}", results.len());
+                warn!("Error with validate account db results: {}", results.len());
                 return Err(DBError::InvalidDBResponse);
             },
         };
@@ -658,14 +658,14 @@ impl Db {
         {
             Ok(vals) => vals,
             Err(err) => {
-                println!("Error getting channel: {}", err);
+                warn!("Error getting channel: {}", err);
                 return Err(DBError::InvalidDBResponse);
             },
         };
 
         // Make sure we got only one
         if results.len() != 1 {
-            println!(
+            warn!(
                 concat!("Error with channel list db results: ",
                     "user {}, list {}, result count {}"),
                 user_id, list_name, results.len()
@@ -680,14 +680,14 @@ impl Db {
         {
             Ok(1) => Ok(Response::Empty),
             Ok(val) => {
-                println!(concat!(
+                warn!(concat!(
                         "Updating active channel returned other-than 1: ",
                         "userid {} list {} count {}"),
                     user_id, list_name, val
                 );
                 Err(DBError::InvalidDBResponse)},
             Err(err) => {
-                println!(concat!("Error active channel ",
+                warn!(concat!("Error active channel ",
                         "userid {} list {} err {:?}"),
                     user_id, list_name, err
                 );

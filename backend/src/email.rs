@@ -143,7 +143,7 @@ impl Email {
         let dest_addr_addr = match parse_addr(&reg_dat.dest_addr) {
             Ok(addr) => addr,
             Err(err) => {
-                println!("Failed to parse email addr {} - {}",
+                info!("Failed to parse email addr {} - {}",
                     reg_dat.dest_addr, err);
                 return;
             },
@@ -158,17 +158,17 @@ impl Email {
         {
             Ok(val) => val,
             Err(err) => {
-                println!("Failed to build message: {:?}", err);
+                error!("Failed to build message: {:?}", err);
                 return;
             },
         };
 
         match smtp.send(&msg) {
             Ok(_) => {
-                println!("Registration email sent successfully");
+                debug!("Registration email sent successfully");
             },
             Err(e) => {
-                println!("Error sending registration email: {:?}", e);
+                warn!("Error sending registration email: {:?}", e);
             },
         };
     }
