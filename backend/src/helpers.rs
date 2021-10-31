@@ -42,12 +42,12 @@ where
     ERRTYPE: Debug,
 {
     if count <= 0 {
-        println!("Retries exhausted");
+        warn!("Retries exhausted");
         return Err(RetryErr::RetriesExhausted);
     }
 
     func().or_else( |err| {
-        println!("Error with {} retries remaining: {:?}", count - 1, err);
+        warn!("Error with {} retries remaining: {:?}", count - 1, err);
         sleep(sleep_len);
         retry_on_err(count - 1, sleep_len, func)
     })

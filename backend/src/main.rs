@@ -1,5 +1,6 @@
 #[macro_use] extern crate diesel;
 #[macro_use] extern crate diesel_migrations;
+#[macro_use] extern crate log;
 
 pub mod schema;
 pub mod db_models;
@@ -54,6 +55,11 @@ async fn main() {
         Ok(val) => val,
         Err(err) => panic!("Error parsing smtp_port: {}", err),
     };
+
+    if std::env::var_os("RUST_LOG").is_none() {
+        std::env::set_var("RUST_LOG", format!("{}=info", api::LOG_KEY));
+    }
+    pretty_env_logger::init();
 
     // Setup DB with arc mutex
     let db_url = format!("postgres://{}:{}@{}/roku_channel_builder",

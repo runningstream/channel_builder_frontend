@@ -67,18 +67,21 @@ impl Rejections {
 pub async fn authenticate_ro(db: db::Db, form_dat: models::AuthForm)
     -> Result<impl Reply, Rejection>
 {
+    trace!("Starting authenticate_ro");
     authenticate_gen(SessType::Roku, db, form_dat).await
 }
 
 pub async fn authenticate_fe(db: db::Db, form_dat: models::AuthForm)
     -> Result<impl Reply, Rejection>
 {
+    trace!("Starting authenticate_fe");
     authenticate_gen(SessType::Frontend, db, form_dat).await
 }
 
 async fn authenticate_gen(sess_type: SessType, db: db::Db, form_dat: models::AuthForm)
     -> Result<impl Reply, Rejection>
 {
+    trace!("Starting authenticate_gen");
     let (pass_hash, hash_ver, valid_status) = 
         match db.please(Action::GetUserPassHash {
             user: form_dat.username.clone(),
@@ -114,6 +117,8 @@ async fn authenticate_gen(sess_type: SessType, db: db::Db, form_dat: models::Aut
         SessType::Roku => warp::reply::html(sess_key.clone()),
         _ => warp::reply::html("".to_string()),
     };
+
+    trace!("Session key: {}", sess_key.clone());
 
     // TODO - why do I authenticate the password after making the session key?
     // that doesn't seem to make sense
@@ -237,6 +242,7 @@ async fn validate_session(_sess_type: SessType, _db: db::Db,
 pub async fn retrieve_session_dat(session_id: String, db: db::Db, sess_type: SessType)
     -> Result<(String, i32), Rejection>
 {
+    trace!("Starting retrieve_session_dat");
     match db.please(Action::ValidateSessKey {
         sess_type: sess_type,
         sess_key: session_id.clone(),
@@ -409,18 +415,18 @@ pub async fn handle_rejection(err: Rejection)
             },
             Some(Rejections::ErrorInternal(content))
             => {
-                println!("ErrorInternal: {}", content);
+                info!("ErrorInternal: {}", content);
                 code = StatusCode::INTERNAL_SERVER_ERROR;
                 message = "Internal Server Error: INTERNAL";
             },
             Some(Rejections::ErrorFromDB(dberr))
             => {
-                println!("ErrorFromDB: {}", dberr);
+                info!("ErrorFromDB: {}", dberr);
                 code = StatusCode::INTERNAL_SERVER_ERROR;
                 message = "Internal Server Error: DB";
             },
             other => {
-                println!("Unhandled error on request: {:?}", other);
+                info!("Unhandled error on request: {:?}", other);
                 code = StatusCode::INTERNAL_SERVER_ERROR;
                 message = "Internal Server Error: OTHER";
             },

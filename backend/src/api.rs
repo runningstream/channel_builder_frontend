@@ -5,6 +5,8 @@ use warp::{Filter, Reply, Rejection};
 // TODO is this big enough?
 const MAX_AUTH_FORM_LEN: u64 = 1024 * 256;
 
+pub const LOG_KEY: &str = "backend";
+
 pub fn build_filters(db: db::Db, email: email::Email, cors_origin: String)
     -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
 {
@@ -14,26 +16,30 @@ pub fn build_filters(db: db::Db, email: email::Email, cors_origin: String)
         .allow_methods(vec!["GET", "POST"])
         .allow_credentials(true);
 
-    origin_referer_filt(cors_origin.clone()).and(
-        api_authenticate_fe(db.clone())
-            .or(api_authenticate_ro(db.clone()))
-            .or(api_create_account(db.clone(), email.clone()))
-            .or(api_validate_account(db.clone()))
-            .or(api_logout_session_fe(db.clone()))
-            .or(api_get_channel_lists(db.clone()))
-            .or(api_get_channel_list(db.clone()))
-            .or(api_get_channel_xml_ro(db.clone()))
-            .or(api_set_channel_list(db.clone()))
-            .or(api_create_channel_list(db.clone()))
-            .or(api_set_active_channel(db.clone()))
-            .or(api_validate_session_fe(db.clone()))
-            .or(api_validate_session_ro(db.clone()))
-            //.or(serve_static_index())
-            //.or(serve_static_files())
+    // Permit Roku endpoints to avoid origin_referer_filt
+    // Require browser endpoints to meet that filter requirement
+    api_authenticate_ro(db.clone())
+        .or(api_validate_session_ro(db.clone()))
+        .or(api_get_channel_xml_ro(db.clone()))
+        .or(
+            origin_referer_filt(cors_origin.clone()).and(
+                api_authenticate_fe(db.clone())
+                    .or(api_create_account(db.clone(), email.clone()))
+                    .or(api_validate_account(db.clone()))
+                    .or(api_logout_session_fe(db.clone()))
+                    .or(api_get_channel_lists(db.clone()))
+                    .or(api_get_channel_list(db.clone()))
+                    .or(api_set_channel_list(db.clone()))
+                    .or(api_create_channel_list(db.clone()))
+                    .or(api_set_active_channel(db.clone()))
+                    .or(api_validate_session_fe(db.clone()))
+                    //.or(serve_static_index())
+                    //.or(serve_static_files())
+            )
         )
         .recover(api_handlers::handle_rejection)
         .with(cors)
-        .with(warp::log("backend"))
+        .with(warp::log(LOG_KEY))
 }
 
 /*

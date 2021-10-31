@@ -18,7 +18,9 @@ Install sass by running `npm install sass` in the frontend directory.  Then run 
 
 ### Backend
 
+Run in the docker container: `./build_backend_container.sh`
 
+Then push the resulting container to docker hub so you can pull it back down with the `production-docker-compose.yml`.
 
 ## Backing Up and Restoring the Database
 

@@ -19,3 +19,5 @@ rand = "^0.8"
 chrono = "^0.4"
 lettre = { version = "^0.10.0-rc.3", features = ["rustls-tls"] }
 thiserror = "^1.0.29"
+log = "0.4"
+pretty_env_logger = "0.4"
