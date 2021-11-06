@@ -9,6 +9,7 @@ function main() {
         pops_back: $("#popup_back"),
         pops_area: $("#popup_area"),
         spin_back: $("#spinner_back"),
+        demo_area: $("#demo_channels"),
     };
 
     const urlParams = new URLSearchParams(window.location.search);
@@ -93,6 +94,16 @@ LoginScreen.prototype.draw = function (screen_props) {
     let usecases_section = $(
         '<section id="login_usecases">' +
         '<h1>Why?</h1>' +
+        '<p>Tap the baby example for a demo...</p>' +
+        '</section>'
+        );
+    let baby_usecase = $(
+        '<div class="usecase">' +
+        '<img src="img/baby.svg" />' +
+        '<p>Build a channel just for your child</p>' +
+        '</div>'
+        ).click(function() { disp_demo(screen_props, "#baby_demo"); });
+    let other_usecases = $(
         '<div class="usecase">' +
         '<img src="img/videotape.svg" />' +
         '<p>Home videos on demand</p>' +
@@ -102,19 +113,14 @@ LoginScreen.prototype.draw = function (screen_props) {
         '<p>Stream your party mix!</p>' +
         '</div>' +
         '<div class="usecase">' +
-        '<img src="img/baby.svg" />' +
-        '<p>Build a channel just for your child</p>' +
-        '</div>' +
-        '<div class="usecase">' +
         '<img src="img/mortarboard.svg" />' +
         '<p>Put a graduate compilation on loop</p>' +
         '</div>' +
         '<div class="usecase">' +
         '<img src="img/shop.svg" />' +
         "<p>Loop your shop's promo video</p>" +
-        '</div>' +
-        '</section>'
-    );
+        '</div>'
+        );
     let trailer_section = $(
         '<section id="login_trailer">' +
         '<h2>Free.  No catch.</h2>' +
@@ -183,6 +189,9 @@ LoginScreen.prototype.draw = function (screen_props) {
     login_form.append(button_div);
     intro_section.append(intro_text);
     login_section.append(login_form);
+
+    usecases_section.append(baby_usecase);
+    usecases_section.append(other_usecases);
 
     screen_props.draw_area.append(intro_section);
     screen_props.draw_area.append(intro_sec_two);
@@ -960,6 +969,23 @@ function disp_spinner(screen_props) {
 
 function hide_spinner(screen_props) {
     screen_props.spin_back.addClass("notdisplayed");
+}
+
+function disp_demo(screen_props, demo_id) {
+    screen_props.demo_area.removeClass("notdisplayed");
+    $(demo_id).removeClass("notdisplayed");
+    screen_props.demo_area.click(function(ev) {
+            if( screen_props.demo_area.toArray().includes(ev.target) ) {
+                hide_demo(screen_props, demo_id);
+                return false;
+            }
+            return true;
+        });
+}
+
+function hide_demo(screen_props, demo_id) {
+    screen_props.demo_area.addClass("notdisplayed");
+    $(demo_id).addClass("notdisplayed");
 }
 
 function make_api_request(urlpart, api_props, screen_props, show_spinner,

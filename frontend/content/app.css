@@ -100,7 +100,7 @@ section {
   background-color: #e7e8d1;
 }
 
-#popup_back, #spinner_back {
+#popup_back, #spinner_back, #demo_channels {
   position: fixed;
   z-index: 100;
   top: 0;
@@ -282,8 +282,11 @@ section {
   flex-wrap: wrap;
   justify-content: center;
 }
-.login_page #login_usecases h1 {
+.login_page #login_usecases h1, .login_page #login_usecases p {
   width: 100%;
+  margin: 0 0 10px 0;
+}
+.login_page #login_usecases p {
   margin: 0 0 50px 0;
 }
 .login_page #login_usecases .usecase {
@@ -355,6 +358,17 @@ section {
   100% {
     transform: rotate(360deg);
   }
+}
+#demo_channels div {
+  margin: 4em auto;
+  width: fit-content;
+  height: fit-content;
+}
+#demo_channels div img {
+  display: block;
+  margin: auto;
+  border: 5px solid black;
+  max-width: 90%;
 }
 
 /*# sourceMappingURL=app.css.map */
