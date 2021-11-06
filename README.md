@@ -26,7 +26,7 @@ Then push the resulting container to docker hub so you can pull it back down wit
 
 ### Backup
 
-`docker-compose -f production-docker-compose.yaml exec db pg_dump roku_channel_builder -U postgres > ~/db_backup`
+`docker-compose -f production-docker-compose.yml exec db pg_dump roku_channel_builder -U postgres > ~/db_backup`
 
 ### Restore
 
