@@ -5,6 +5,7 @@ use std::result::Result;
 use std::fmt::Debug;
 use std::time::Duration;
 use std::thread::sleep;
+use chrono;
 use serde_json::Value;
 use thiserror::Error;
 
@@ -17,10 +18,10 @@ pub static SESSION_COOKIE_NAME: &str = "session";
 pub enum SessType { Frontend, Roku }
 
 impl SessType {
-    pub fn get_max_age(&self) -> u32 {
+    pub fn get_max_age(&self) -> chrono::Duration {
         match *self {
-            SessType::Frontend => 60 * 24 * 5, // 5 days
-            SessType::Roku => 60 * 24 * 365,   // 365 days
+            SessType::Frontend => chrono::Duration::days(5),
+            SessType::Roku => chrono::Duration::days(365),
         }
     }
 }
@@ -152,5 +153,17 @@ mod tests {
         let result = build_xml(json_input);
         let expected = "<array_elem>4</array_elem><array_elem>5</array_elem><array_elem>Testing!</array_elem><array_elem></array_elem><array_elem>true</array_elem>";
         assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn max_age_roku() {
+        let st = SessType::Roku;
+        assert_eq!(60*60*24*365, st.get_max_age().num_seconds());
+    }
+
+    #[test]
+    fn max_age_frontend() {
+        let st = SessType::Frontend;
+        assert_eq!(60*60*24*5, st.get_max_age().num_seconds());
     }
 }

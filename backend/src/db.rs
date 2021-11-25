@@ -388,11 +388,10 @@ impl Db {
         // Validate that session key hasn't expired
         let time_now = Utc::now();
 
-        let max_age = sess_type.get_max_age();
-
         let sess_key_age = time_now.signed_duration_since(
             result.creationtime);
-        if sess_key_age > chrono::Duration::seconds(max_age.into()) {
+        if sess_key_age > sess_type.get_max_age()
+        {
             // Delete sess key
             let del_result = match sess_type {
                 SessType::Frontend => 

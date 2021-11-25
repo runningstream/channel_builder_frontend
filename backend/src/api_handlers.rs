@@ -109,8 +109,6 @@ async fn authenticate_gen(sess_type: SessType, db: db::Db, form_dat: models::Aut
         Err(err) => Err(Rejections::from(err)),
     }?;
 
-    let max_age = sess_type.get_max_age();
-
     // Add the session key as content if this is a roku auth
     // TODO: make it so we don't have to do that anymore...
     let base_reply = match sess_type {
@@ -132,7 +130,7 @@ async fn authenticate_gen(sess_type: SessType, db: db::Db, form_dat: models::Aut
                 "Set-Cookie", 
                 format!("{}={}; Max-Age={}; SameSite=Lax", 
                     helpers::SESSION_COOKIE_NAME, sess_key,
-                    max_age)
+                    sess_type.get_max_age().num_seconds())
             )),
         Ok(false) => Err(Rejections::InvalidPassword.into()),
         Err(err) => Err(Rejections::from(err).into())
