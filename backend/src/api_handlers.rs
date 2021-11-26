@@ -450,7 +450,7 @@ mod tests{
     /// and Rejections into Rejection
     #[tokio::test]
     async fn try_handle_rejection_dberror() {
-        let rejection: Rejection = Rejections::from(DBError::InvalidUsername).into();
+        let rejection: Rejection = Rejections::from(DBError::InvalidRowCount(5)).into();
         let result = handle_rejection(rejection).await.unwrap();
         let expected = Ok(
             warp::reply::with_status("Internal Server Error: DB",
@@ -465,10 +465,12 @@ mod tests{
 
     #[test]
     fn print_error() {
-        let reject1 = Rejections::from(DBError::InvalidUsername);
+        let reject1 = Rejections::from(DBError::InvalidRowCount(10));
         let reject2 = Rejections::db_api_err("ValidateAccount", Response::Bool(false));
+        let reject3 = Rejections::from(DBError::from(diesel::result::Error::NotFound));
 
         println!("{}", reject1);
         println!("{}", reject2);
+        println!("{}", reject3);
     }
 }

@@ -24,20 +24,20 @@ embed_migrations!();
 pub enum DBError {
     #[error("entry already exists")]
     EntryAlreadyExists,
-    #[error("database returned invalid row count {0}")]
+    #[error("database returned invalid row count: {0}")]
     InvalidRowCount(usize),
 
-    #[error("json conversion error {source}")]
+    #[error("json conversion error: {source}")]
     JSONConversionError {
         #[from]
         source: serde_json::Error,
     },
-    #[error("error getting result from database thread {source}")]
+    #[error("error getting result from database thread: {source}")]
     ThreadResponseFailure { 
         #[from]
         source: oneshot::error::RecvError,
     },
-    #[error("other database error {source}")]
+    #[error("other database error: {source}")]
     OtherErr {
         #[from]
         source: diesel::result::Error,
