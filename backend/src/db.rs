@@ -6,12 +6,11 @@ use helpers::SessType;
 use diesel::pg::PgConnection;
 use diesel::Connection;
 use diesel::RunQueryDsl;
-use diesel::result::Error::NotFound;
-use std::{error, fmt};
 use std::sync::mpsc;
 use tokio::task;
 use tokio::sync::oneshot;
 use chrono::Utc;
+use thiserror::Error;
 use crate::diesel::{QueryDsl, ExpressionMethods};
 use crate::schema::{user_data, channel_list, front_end_sess_keys, roku_sess_keys};
 use crate::schema::user_data::dsl::user_data as ud_dsl;
@@ -21,31 +20,28 @@ use crate::schema::roku_sess_keys::dsl::roku_sess_keys as rosk_dsl;
 
 embed_migrations!();
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum DBError {
-    PassHashError,
-    InvalidDBResponse,
-    InvalidValidationCode,
-    InvalidUsername,
-    JSONConversionError,
+    #[error("entry already exists")]
     EntryAlreadyExists,
-    NoEntryReturned,
-    ThreadResponseFailure,
-}
+    #[error("database returned invalid row count {0}")]
+    InvalidRowCount(usize),
 
-impl fmt::Display for DBError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Error: {:?}", *self)
-    }
-}
-
-// TODO - implement sources for these if/where appropriate
-impl error::Error for DBError {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        match *self {
-            _ => None,
-        }
-    }
+    #[error("json conversion error {source}")]
+    JSONConversionError {
+        #[from]
+        source: serde_json::Error,
+    },
+    #[error("error getting result from database thread {source}")]
+    ThreadResponseFailure { 
+        #[from]
+        source: oneshot::error::RecvError,
+    },
+    #[error("other database error {source}")]
+    OtherErr {
+        #[from]
+        source: diesel::result::Error,
+    },
 }
 
 #[derive(Clone)]
@@ -86,6 +82,21 @@ pub enum Response {
 struct Message {
     resp: oneshot::Sender<Result<Response, DBError>>,
     action: Action,
+}
+
+trait GetCount { fn count(&self) -> usize; }
+impl GetCount for usize { fn count(&self) -> usize { *self } }
+impl<T> GetCount for Vec<T> { fn count(&self) -> usize { self.len() } }
+
+// Error when the query result is an error, or has a number of rows other than 1
+fn allow_only_one<T: GetCount>(qr: diesel::result::QueryResult<T>) ->
+        Result<T, DBError>
+{
+    let unwrapped = qr?;
+    match unwrapped.count() {
+        1 => Ok(unwrapped),
+        val => Err(DBError::InvalidRowCount(val)),
+    }
 }
 
 impl Db {
@@ -129,15 +140,7 @@ impl Db {
         };
 
         match self.db_tx.send(msg) {
-            Ok(_) => {
-                match rx.await {
-                    Ok(result) => result,
-                    Err(err) => {
-                        error!("Error getting result from database thread: {}", err);
-                        Err(DBError::ThreadResponseFailure)
-                    }
-                }
-            },
+            Ok(_) => rx.await?,
             Err(err) => {panic!("DB request failed! Dying: {}", err);},
         }
     }
@@ -200,71 +203,36 @@ impl Db {
         };
 
         // Make the database insert
-        match diesel::insert_into(user_data::table)
-            .values(&new_user)
-            .returning(user_data::id)
-            .get_results(&dat.db_conn)
-        {
-            //Ok(1) => Ok(Response::Empty), // From .execute, TODO delete
-            Ok(user_ids) => {
-                if user_ids.len() != 1 {
-                    warn!("Adding user returned other-than 1 row: {:?}", user_ids);
-                    Err(DBError::InvalidDBResponse)
-                } else {
-                    Ok(Response::UserID(user_ids[0]))
-                }
-            },
-            Err(err) => {
-                warn!("Error {:?}", err);
-                Err(DBError::InvalidDBResponse)},
-        }
+        let user_ids = allow_only_one(
+            diesel::insert_into(user_data::table)
+                .values(&new_user)
+                .returning(user_data::id)
+                .get_results(&dat.db_conn)
+        )?;
+
+        Ok(Response::UserID(user_ids[0]))
     }
 
     fn validate_account(dat: &InThreadData, val_code: String)
         -> Result<Response, DBError>
     {
         // Find the user_data that matches the val_code if there is one
-        let results = match ud_dsl.filter(user_data::validation_code.eq(val_code))
-            .limit(5)
-            .load::<db_models::QueryUserData>(&dat.db_conn)
-        {
-            Ok(vals) => vals,
-            Err(err) => {
-                warn!("Error getting validation code: {}", err);
-                return Err(DBError::InvalidValidationCode);},
-        };
-
-        // Make sure the returned values make a little sense
-        match results.len() {
-            0 => {
-                return Err(DBError::InvalidValidationCode);
-            },
-            1 => {},
-            _ => {
-                warn!("Error with validate account db results: {}", results.len());
-                return Err(DBError::InvalidDBResponse);
-            },
-        };
-
-        // Grab the ID
-        let id = results[0].id;
+        let results = allow_only_one(
+            ud_dsl.filter(user_data::validation_code.eq(val_code))
+                .limit(5)
+                .load::<db_models::QueryUserData>(&dat.db_conn)
+        )?;
 
         // Update it
-        match diesel::update(ud_dsl.find(id))
+        allow_only_one(
+            diesel::update(ud_dsl.find(results[0].id))
             .set((
                 user_data::validation_status.eq(true),
                 user_data::validation_code.eq::<Option<String>>(None),
             ))
-            .execute(&dat.db_conn)
-        {
-            Ok(1) => Ok(Response::Bool(true)),
-            Ok(val) => {
-                warn!("Updating status returned other-than 1: {}", val);
-                Err(DBError::InvalidDBResponse)},
-            Err(err) => {
-                warn!("Error {:?}", err);
-                Err(DBError::InvalidDBResponse)},
-        }
+            .execute(&dat.db_conn))?;
+
+        Ok(Response::Bool(true))
     }
 
     fn add_session_key(dat: &InThreadData, user: String,
@@ -275,66 +243,41 @@ impl Db {
         let time_now = Utc::now();
 
         // Find the user_data that matches the username if there is one
-        let results = match ud_dsl.filter(user_data::username.eq(user))
+        let results = allow_only_one(
+            ud_dsl.filter(user_data::username.eq(user))
             .limit(5)
             .load::<db_models::QueryUserData>(&dat.db_conn)
-        {
-            Ok(vals) => vals,
-            Err(err) => {
-                warn!("Error getting username: {}", err);
-                return Err(DBError::InvalidUsername);},
-        };
-
-        // Make sure the returned values make a little sense
-        match results.len() {
-            0 => {
-                return Err(DBError::InvalidUsername);
-            },
-            1 => {},
-            _ => {
-                warn!(
-                    "Error with add session key account db results: {}",
-                    results.len());
-                return Err(DBError::InvalidDBResponse);
-            },
-        };
+        )?;
 
         // Build the sess key entry 
-        let result = match sess_type {
-            SessType::Frontend => {
-                let new_sess = db_models::InsertFESessKey {
-                    userid: results[0].id,
-                    sesskey: &sess_key,
-                    creationtime: time_now,
-                    lastusedtime: time_now,
-                };
-                diesel::insert_into(front_end_sess_keys::table)
-                    .values(&new_sess)
-                    .execute(&dat.db_conn)
-            },
-            SessType::Roku => {
-                let new_sess = db_models::InsertROSessKey {
-                    userid: results[0].id,
-                    sesskey: &sess_key,
-                    creationtime: time_now,
-                    lastusedtime: time_now,
-                };
-                diesel::insert_into(roku_sess_keys::table)
-                    .values(&new_sess)
-                    .execute(&dat.db_conn)
-            },
-        };
+        allow_only_one(
+            match sess_type {
+                SessType::Frontend => {
+                    let new_sess = db_models::InsertFESessKey {
+                        userid: results[0].id,
+                        sesskey: &sess_key,
+                        creationtime: time_now,
+                        lastusedtime: time_now,
+                    };
+                    diesel::insert_into(front_end_sess_keys::table)
+                        .values(&new_sess)
+                        .execute(&dat.db_conn)
+                },
+                SessType::Roku => {
+                    let new_sess = db_models::InsertROSessKey {
+                        userid: results[0].id,
+                        sesskey: &sess_key,
+                        creationtime: time_now,
+                        lastusedtime: time_now,
+                    };
+                    diesel::insert_into(roku_sess_keys::table)
+                        .values(&new_sess)
+                        .execute(&dat.db_conn)
+                },
+            }
+        )?;
 
-        match result
-        {
-            Ok(1) => Ok(Response::Empty),
-            Ok(val) => {
-                warn!("Adding sess key other-than 1: {}", val);
-                Err(DBError::InvalidDBResponse)},
-            Err(err) => {
-                warn!("Error {:?}", err);
-                Err(DBError::InvalidDBResponse)},
-        }
+        Ok(Response::Empty)
     }
 
     fn validate_session_key(dat: &InThreadData, sess_type: SessType,
@@ -345,28 +288,14 @@ impl Db {
             (filt_results: Result<Vec<T>, diesel::result::Error>)
             -> Result<db_models::SessKeyComponents, DBError>
         {
-            let results = match filt_results
-            {
-                Ok(vals) => vals,
-                Err(err) => {
-                    warn!("Error getting session key: {}", err);
-                    return Err(DBError::InvalidDBResponse);
-                },
-            };
-            
-            if results.len() != 1 {
-                warn!("Error with session key db results: {}", results.len());
-                return Err(DBError::InvalidDBResponse);
-            }
-
-            Ok(results[0].get_common())
+            Ok(( allow_only_one(filt_results)? )[0].get_common())
         }
 
         // Do the database filter, then run process_filt_result
         // That will result in match legs with the same type...
         // Without processing to a common type before returning,
         // the code won't compile because of different leg types.
-        let processed_result = match sess_type {
+        let result = match sess_type {
             SessType::Frontend =>
                 process_filt_result(
                     fesk_dsl.filter(front_end_sess_keys::sesskey.eq(sess_key))
@@ -379,11 +308,7 @@ impl Db {
                         .limit(5)
                         .load::<db_models::QueryROSessKey>(&dat.db_conn)
                 ),
-        };
-        let result = match processed_result {
-            Ok(val) => val,
-            Err(err) => return Err(err),
-        };
+        }?;
 
         // Validate that session key hasn't expired
         let time_now = Utc::now();
@@ -401,46 +326,34 @@ impl Db {
                     diesel::delete(rosk_dsl.find(result.id))
                         .execute(&dat.db_conn),
             };
-            return match del_result {
-                // Return failed session key
-                Ok(1) => Ok(Response::ValidatedKey(false, 0)),
-                Ok(val) => {
-                    warn!("Updating lastusedtime returned other-than 1: {}", val);
-                    Err(DBError::InvalidDBResponse)},
-                Err(err) => {
-                    warn!("Error updating lastusedtime {:?}", err);
-                    Err(DBError::InvalidDBResponse)},
-            };
+
+            allow_only_one(del_result)?;
+
+            return Ok(Response::ValidatedKey(false, 0));
         }
 
         // Update last used time
-        let upd_res = match sess_type {
-            SessType::Frontend =>
-                diesel::update(fesk_dsl.find(result.id))
-                    .set((front_end_sess_keys::lastusedtime.eq(time_now),))
-                    .execute(&dat.db_conn),
-            SessType::Roku =>
-                diesel::update(rosk_dsl.find(result.id))
-                    .set((roku_sess_keys::lastusedtime.eq(time_now),))
-                    .execute(&dat.db_conn),
-        };
+        allow_only_one(
+            match sess_type {
+                SessType::Frontend =>
+                    diesel::update(fesk_dsl.find(result.id))
+                        .set((front_end_sess_keys::lastusedtime.eq(time_now),))
+                        .execute(&dat.db_conn),
+                SessType::Roku =>
+                    diesel::update(rosk_dsl.find(result.id))
+                        .set((roku_sess_keys::lastusedtime.eq(time_now),))
+                        .execute(&dat.db_conn),
+            }
+        )?;
 
-        match upd_res {
-            Ok(1) => Ok(Response::ValidatedKey(true, result.userid)),
-            Ok(val) => {
-                warn!("Updating lastusedtime returned other-than 1: {}", val);
-                Err(DBError::InvalidDBResponse)},
-            Err(err) => {
-                warn!("Error updating lastusedtime {:?}", err);
-                Err(DBError::InvalidDBResponse)},
-        }
+        Ok(Response::ValidatedKey(true, result.userid))
     }
 
     fn logout_session_key(dat: &InThreadData, sess_type: SessType,
             sess_key: String)
         -> Result<Response, DBError>
     {
-        let result = match sess_type {
+        match sess_type {
             SessType::Frontend => 
                 diesel::delete(fesk_dsl.filter(
                         front_end_sess_keys::sesskey.eq(sess_key)
@@ -449,34 +362,20 @@ impl Db {
                 diesel::delete(rosk_dsl.filter(
                         roku_sess_keys::sesskey.eq(sess_key)
                 )).execute(&dat.db_conn),
-        };
-        match result {
-            // Return failed session key
-            Ok(_) => Ok(Response::Empty),
-            Err(err) => {
-                warn!("Error updating lastusedtime {:?}", err);
-                Err(DBError::InvalidDBResponse)},
-        }
+        }?;
+
+        Ok(Response::Empty)
     }
 
     fn get_user_passhash(dat: &InThreadData, user: String)
         -> Result<Response, DBError>
     {
-        let results = match ud_dsl.filter(user_data::username.eq(user))
-            .limit(5)
-            .load::<db_models::QueryUserData>(&dat.db_conn)
-        {
-            Ok(vals) => vals,
-            Err(err) => {
-                warn!("Error getting user pass hash: {}", err);
-                return Err(DBError::InvalidDBResponse);},
-        };
+        let results = allow_only_one(
+            ud_dsl.filter(user_data::username.eq(user))
+                .limit(5)
+                .load::<db_models::QueryUserData>(&dat.db_conn)
+        )?;
         
-        if results.len() != 1 {
-            warn!("Error with user pass hash db results: {}", results.len());
-            return Err(DBError::InvalidDBResponse);
-        }
-
         Ok(Response::UserPassHash(
             results[0].pass_hash.clone(),
             results[0].pass_hash_type,
@@ -487,57 +386,29 @@ impl Db {
     fn get_channel_lists(dat: &InThreadData, user_id: i32)
         -> Result<Response, DBError>
     {
-        let results = match cl_dsl
+        let results = cl_dsl
             .filter(channel_list::userid.eq(user_id))
-            .load::<db_models::QueryChannelList>(&dat.db_conn)
-        {
-            Ok(vals) => vals,
-            Err(err) => {
-                warn!("Error getting channel lists: {}", err);
-                return Err(DBError::InvalidDBResponse);
-            },
-        };
+            .load::<db_models::QueryChannelList>(&dat.db_conn)?;
         
         let channel_names: Vec<String> = results.iter().map(|result| {
             result.name.clone()
         }).collect();
 
-        match serde_json::to_string(&channel_names) {
-            Ok(val) => Ok(Response::StringResp(val)),
-            Err(err) => {
-                warn!("Error converting channel_names to JSON: {}", err);
-                return Err(DBError::JSONConversionError);
-            },
-        }
+        Ok(Response::StringResp(serde_json::to_string(&channel_names)?))
     }
 
     fn get_channel_list(dat: &InThreadData, user_id: i32, list_name: String)
         -> Result<Response, DBError>
     {
         // Get the channel
-        let results = match cl_dsl
-            .filter(channel_list::userid.eq(user_id))
-            .filter(channel_list::name.eq(&list_name))
-            .limit(5)
-            .load::<db_models::QueryChannelList>(&dat.db_conn)
-        {
-            Ok(vals) => vals,
-            Err(err) => {
-                warn!("Error getting channel list: {}", err);
-                return Err(DBError::InvalidDBResponse);
-            },
-        };
+        let results = allow_only_one(
+            cl_dsl
+                .filter(channel_list::userid.eq(user_id))
+                .filter(channel_list::name.eq(&list_name))
+                .limit(5)
+                .load::<db_models::QueryChannelList>(&dat.db_conn)
+        )?;
 
-        // Make sure we got only one
-        if results.len() != 1 {
-            warn!(
-                concat!("Error with channel list db results: ",
-                    "user {}, list {}, result count {}"),
-                user_id, list_name, results.len()
-            );
-            return Err(DBError::InvalidDBResponse);
-        }
-        
         Ok(Response::StringResp(results[0].data.clone()))
     }
 
@@ -545,28 +416,16 @@ impl Db {
         list_data: String)
         -> Result<Response, DBError>
     {
-        match diesel::update(cl_dsl
+        allow_only_one(
+            diesel::update(cl_dsl
                 .filter(channel_list::userid.eq(user_id))
                 .filter(channel_list::name.eq(&list_name))
             )
             .set(channel_list::data.eq(list_data))
             .execute(&dat.db_conn)
-        {
-            Ok(1) => Ok(Response::Empty),
-            Ok(val) => {
-                warn!(concat!(
-                        "Updating channel list returned other-than 1: ",
-                        "userid {} list {} count {}"),
-                    user_id, list_name, val
-                );
-                Err(DBError::InvalidDBResponse)},
-            Err(err) => {
-                warn!(concat!("Error updating channel list ",
-                        "userid {} list {} err {:?}"),
-                    user_id, list_name, err
-                );
-                Err(DBError::InvalidDBResponse)},
-        }
+        )?;
+
+        Ok(Response::Empty)
     }
 
     fn create_channel_list(dat: &InThreadData, user_id: i32, list_name: String)
@@ -578,16 +437,10 @@ impl Db {
             .filter(channel_list::name.eq(&list_name))
             .first::<db_models::QueryChannelList>(&dat.db_conn)
         {
-            Ok(_) => {
-                info!("Error creating channel - already exists",);
-                return Err(DBError::EntryAlreadyExists);
-            },
-            Err(NotFound) => {},
-            Err(err) => {
-                warn!("Error creating channel: {}", err);
-                return Err(DBError::InvalidDBResponse);
-            },
-        };
+            Ok(_) => Err(DBError::EntryAlreadyExists),
+            Err(diesel::result::Error::NotFound) => Ok(()),
+            Err(err) => Err(err.into()),
+        }?;
 
         // If it doesn't, create it
         let new_channel = db_models::InsertChannelList {
@@ -597,18 +450,13 @@ impl Db {
         };
 
         // Insert it
-        match diesel::insert_into(channel_list::table)
-            .values(&new_channel)
-            .execute(&dat.db_conn)
-        {
-            Ok(1) => Ok(Response::Empty),
-            Ok(val) => {
-                warn!("Adding channel returned other-than 1: {}", val);
-                Err(DBError::InvalidDBResponse)},
-            Err(err) => {
-                warn!("Error {:?}", err);
-                Err(DBError::InvalidDBResponse)},
-        }
+        allow_only_one(
+            diesel::insert_into(channel_list::table)
+                .values(&new_channel)
+                .execute(&dat.db_conn)
+        )?;
+
+        Ok(Response::Empty)
     }
 
     fn get_active_channel(dat: &InThreadData, user_id: i32)
@@ -616,31 +464,14 @@ impl Db {
     {
         joinable!(user_data -> channel_list (active_channel) );
 
-        let results = match channel_list::table
-            .filter(channel_list::userid.eq(user_id))
-            .inner_join(user_data::table)
-            //.filter(user_data::id.eq(user_id))
-            .select(channel_list::data)
-            .limit(5)
-            .load::<String>(&dat.db_conn)
-        {
-            Ok(vals) => vals,
-            Err(err) => {
-                info!("Error getting user pass hash: {}", err);
-                return Err(DBError::InvalidDBResponse);},
-        };
-
-        // Make sure the returned values make a little sense
-        match results.len() {
-            0 => {
-                return Err(DBError::NoEntryReturned);
-            },
-            1 => {},
-            _ => {
-                warn!("Error with validate account db results: {}", results.len());
-                return Err(DBError::InvalidDBResponse);
-            },
-        };
+        let results = allow_only_one(
+            channel_list::table
+                .filter(channel_list::userid.eq(user_id))
+                .inner_join(user_data::table)
+                .select(channel_list::data)
+                .limit(5)
+                .load::<String>(&dat.db_conn)
+        )?;
 
         Ok(Response::StringResp(results[0].clone()))
     }
@@ -649,48 +480,21 @@ impl Db {
         -> Result<Response, DBError>
     {
         // Get the channel
-        let results = match cl_dsl
-            .filter(channel_list::userid.eq(user_id))
-            .filter(channel_list::name.eq(&list_name))
-            .limit(5)
-            .load::<db_models::QueryChannelList>(&dat.db_conn)
-        {
-            Ok(vals) => vals,
-            Err(err) => {
-                warn!("Error getting channel: {}", err);
-                return Err(DBError::InvalidDBResponse);
-            },
-        };
-
-        // Make sure we got only one
-        if results.len() != 1 {
-            warn!(
-                concat!("Error with channel list db results: ",
-                    "user {}, list {}, result count {}"),
-                user_id, list_name, results.len()
-            );
-            return Err(DBError::InvalidDBResponse);
-        }
+        let results = allow_only_one(
+            cl_dsl
+                .filter(channel_list::userid.eq(user_id))
+                .filter(channel_list::name.eq(&list_name))
+                .limit(5)
+                .load::<db_models::QueryChannelList>(&dat.db_conn)
+        )?;
 
         // Update the user to reflect the id
-        match diesel::update(ud_dsl.find(user_id))
-            .set(user_data::active_channel.eq(results[0].id))
-            .execute(&dat.db_conn)
-        {
-            Ok(1) => Ok(Response::Empty),
-            Ok(val) => {
-                warn!(concat!(
-                        "Updating active channel returned other-than 1: ",
-                        "userid {} list {} count {}"),
-                    user_id, list_name, val
-                );
-                Err(DBError::InvalidDBResponse)},
-            Err(err) => {
-                warn!(concat!("Error active channel ",
-                        "userid {} list {} err {:?}"),
-                    user_id, list_name, err
-                );
-                Err(DBError::InvalidDBResponse)},
-        }
+        allow_only_one(
+            diesel::update(ud_dsl.find(user_id))
+                .set(user_data::active_channel.eq(results[0].id))
+                .execute(&dat.db_conn)
+        )?;
+
+        Ok(Response::Empty)
     }
 }
