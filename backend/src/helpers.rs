@@ -13,6 +13,8 @@ use thiserror::Error;
 /// The name of the session cookie in the frontend
 pub static SESSION_COOKIE_NAME: &str = "session";
 
+pub static VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// An enum that differentiates frontend session types
 #[derive(Debug, Clone)]
 pub enum SessType { Frontend, Roku }

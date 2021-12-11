@@ -70,6 +70,8 @@ async fn main() {
     let email = email::Email::new(smtp_server, smtp_port, smtp_username,
         smtp_password, email_from, frontend_loc.clone());
 
+    info!("channel_builder version {}", helpers::VERSION);
+
     let api = api::build_filters(db, email, frontend_loc);
     let server_sockaddr: std::net::SocketAddr = server_address
         .parse()
