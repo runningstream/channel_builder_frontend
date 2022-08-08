@@ -20,7 +20,7 @@ services:
         environment:
             POSTGRES_PASSWORD_FILE: /run/secrets/db_password
         volumes:
-            - "db_data:/var/lib/postgresql/data"
+            #- "db_data:/var/lib/postgresql/data"
             - type: bind
               source: "./docker-entrypoint-initdb.d"
               target: "/docker-entrypoint-initdb.d"
@@ -29,7 +29,10 @@ services:
         secrets:
             - db_password
     channel_builder:
-        image: runningstream/channel_builder_backend:latest
+        #image: runningstream/channel_builder_backend:latest
+        build:
+            context: ../backend
+            dockerfile: ../docker/Dockerfile-build-testing
         environment:
             POSTGRES_PASSWORD_FILE: /run/secrets/db_password
             POSTGRES_HOST: "db:5432"
@@ -41,7 +44,7 @@ services:
             SMTP_PASSWORD_FILE: /run/secrets/smtp_password
             EMAIL_FROM_ADDR_FILE: /run/secrets/email_from
             RUST_BACKTRACE: 1
-            RUST_LOG: "info"
+            RUST_LOG: "debug"
         ports:
             - 3031:3031
         secrets:

@@ -2,6 +2,8 @@
 #[macro_use] extern crate diesel_migrations;
 #[macro_use] extern crate log;
 
+use chrono::prelude::Utc;
+
 pub mod schema;
 pub mod db_models;
 pub mod email;
@@ -50,6 +52,7 @@ async fn main() {
     let smtp_username = get_env_param("SMTP_USERNAME", Some("webmaster"));
     let smtp_password = get_env_param("SMTP_PASSWORD", Some(""));
     let email_from = get_env_param("EMAIL_FROM_ADDR", Some("webmaster@localhost"));
+    let startup_time = Utc::now();
 
     let smtp_port: u16 = match smtp_port_str.parse() {
         Ok(val) => val,
@@ -71,8 +74,9 @@ async fn main() {
         smtp_password, email_from, frontend_loc.clone());
 
     info!("channel_builder version {}", helpers::VERSION);
+    info!("channel_builder startup time {}", startup_time); 
 
-    let api = api::build_filters(db, email, frontend_loc);
+    let api = api::build_filters(db, email, frontend_loc, startup_time);
     let server_sockaddr: std::net::SocketAddr = server_address
         .parse()
         .expect("Unable to parse socket address");

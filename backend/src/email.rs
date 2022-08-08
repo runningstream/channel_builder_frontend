@@ -1,6 +1,6 @@
 /// Handle email
 
-use std::time;
+use std::{time, fmt};
 use std::sync::{Arc, mpsc};
 use tokio::task;
 use tokio::sync::Mutex;
@@ -9,7 +9,7 @@ use lettre::message::{MultiPart, Mailbox};
 use lettre::address::AddressError;
 use lettre::{Address, Transport};
 
-const EMAIL_PERIOD: u64 = 10; // seconds between trying to send email
+const EMAIL_PERIOD: u64 = 1; // seconds between trying to send email
 
 pub fn parse_addr(addr: &str) -> Result<Mailbox, AddressError> {
     let address: Address = addr.parse()?;
@@ -38,9 +38,26 @@ pub struct RegisterData {
     pub reg_key: String,
 }
 
+#[derive(Debug, Copy, Clone, Default)]
+pub struct StatusReport {
+    successes: u32,
+    fails_parse_email: u32,
+    fails_msg_build: u32,
+    fails_sending: u32,
+}
+
+impl fmt::Display for StatusReport {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Email status report:\n  Successes: {}\n  Fails:\n    Parsing addrs: {}\n    Building message: {}\n    Sending: {}",
+            self.successes, self.fails_parse_email,
+            self.fails_msg_build, self.fails_sending)
+    }
+}
+
 #[derive(Clone)]
 pub enum Action {
     SendRegAcct(RegisterData),
+    GetStatusReport(tokio::sync::mpsc::Sender<StatusReport>),
 }
 
 impl Email {
@@ -115,27 +132,30 @@ impl Email {
             Err(err) => panic!("Failed building smtp: {}", err),
         };
 
+        let mut status_report: StatusReport = Default::default();
         loop {
             std::thread::sleep(sleep_time);
             
-            while let Some(msg) = match email_rx.try_recv() {
+            while let Some(msg) = match email_rx.recv() {
                 Ok(msg) => Some(msg), 
-                Err(mpsc::TryRecvError::Empty) => None,
-                Err(mpsc::TryRecvError::Disconnected) => { 
+                Err(_err) => { 
                     panic!("Email sender disconnected!");
                 },
             } {
-                match msg {
+                status_report = match msg {
                     Action::SendRegAcct(reg_dat) => 
-                        Self::send_reg_acct(smtp.clone(), dat.clone(), reg_dat),
+                        Self::send_reg_acct(status_report, smtp.clone(),
+                            dat.clone(), reg_dat),
+                    Action::GetStatusReport(sender) =>
+                        Self::get_status_report(status_report, sender),
                 }
             }
         }
     }
 
-    fn send_reg_acct(smtp: lettre::SmtpTransport, dat: InThreadData,
-            reg_dat: RegisterData)
-        -> ()
+    fn send_reg_acct(mut status_report: StatusReport, smtp: lettre::SmtpTransport,
+            dat: InThreadData, reg_dat: RegisterData)
+        -> StatusReport
     {
         let text_msg = format!("Welcome to Running Stream - build your own Roku channel!  Please paste the following link into your browser to complete registration {}/?val_code={} - if you did not attempt to register at Running Stream please just delete this email.", dat.frontend_loc_str, reg_dat.reg_key);
         let html_msg = format!("<p>Welcome to Running Stream - build your own Roku channel!</p>  <p><a href=\"{}/?val_code={}\">Please click here to complete registration</a></p>  <p>If you did not attempt to register at Running Stream please just delete this email.</p>", dat.frontend_loc_str, reg_dat.reg_key);
@@ -145,7 +165,9 @@ impl Email {
             Err(err) => {
                 info!("Failed to parse email addr {} - {}",
                     reg_dat.dest_addr, err);
-                return;
+                status_report.fails_parse_email += 1;
+
+                return status_report;
             },
         };
 
@@ -159,17 +181,34 @@ impl Email {
             Ok(val) => val,
             Err(err) => {
                 error!("Failed to build message: {:?}", err);
-                return;
+                status_report.fails_msg_build += 1;
+
+                return status_report;
             },
         };
 
         match smtp.send(&msg) {
             Ok(_) => {
                 debug!("Registration email sent successfully");
+                status_report.successes += 1;
             },
             Err(e) => {
                 warn!("Error sending registration email: {:?}", e);
+                status_report.fails_sending += 1;
             },
         };
+
+        return status_report;
+    }
+
+    fn get_status_report(status_report: StatusReport,
+            sender: tokio::sync::mpsc::Sender<StatusReport>)
+        -> StatusReport
+    {
+        match sender.blocking_send(status_report) {
+            Ok(_) => (),
+            Err(err) => {warn!("Error sending status report: {}", err);},
+        }
+        status_report
     }
 }

@@ -1,4 +1,5 @@
 use crate::{api_handlers, db, helpers, email, models};
+use chrono::prelude::{DateTime, Utc};
 use helpers::{SessType, SESSION_COOKIE_NAME};
 use warp::{Filter, Reply, Rejection};
 
@@ -7,7 +8,8 @@ const MAX_AUTH_FORM_LEN: u64 = 1024 * 256;
 
 pub const LOG_KEY: &str = "backend";
 
-pub fn build_filters(db: db::Db, email: email::Email, cors_origin: String)
+pub fn build_filters(db: db::Db, email: email::Email, cors_origin: String,
+        startup_time: DateTime<Utc>)
     -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
 {
     // Setup warp's built in CORS
@@ -16,11 +18,12 @@ pub fn build_filters(db: db::Db, email: email::Email, cors_origin: String)
         .allow_methods(vec!["GET", "POST"])
         .allow_credentials(true);
 
-    // Permit Roku endpoints to avoid origin_referer_filt
+    // Permit Roku endpoints and status to avoid origin_referer_filt
     // Require browser endpoints to meet that filter requirement
     api_authenticate_ro(db.clone())
         .or(api_validate_session_ro(db.clone()))
         .or(api_get_channel_xml_ro(db.clone()))
+        .or(api_get_status_report(startup_time, db.clone(), email.clone()))
         .or(
             origin_referer_filt(cors_origin.clone()).and(
                 api_authenticate_fe(db.clone())
@@ -33,10 +36,10 @@ pub fn build_filters(db: db::Db, email: email::Email, cors_origin: String)
                     .or(api_create_channel_list(db.clone()))
                     .or(api_set_active_channel(db.clone()))
                     .or(api_validate_session_fe(db.clone()))
-                    //.or(serve_static_index())
-                    //.or(serve_static_files())
             )
         )
+        //.or(serve_static_index())
+        //.or(serve_static_files())
         .recover(api_handlers::handle_rejection)
         .with(cors)
         .with(warp::log(LOG_KEY))
@@ -209,6 +212,17 @@ fn api_set_active_channel(db: db::Db)
         .and(validate_session(SessType::Frontend, db))
         .and(get_form::<models::SetActiveChannelForm>())
         .and_then(api_handlers::set_active_channel)
+}
+
+fn api_get_status_report(startup_time: DateTime<Utc>, db: db::Db, email: email::Email)
+    -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
+{
+    api_v1_path("status_report")
+        .and(warp::get())
+        .and(add_in(startup_time))
+        .and(add_in(db))
+        .and(add_in(email))
+        .and_then(api_handlers::get_status_report)
 }
 
 fn get_form<T>()

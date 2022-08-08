@@ -1,5 +1,6 @@
 use std::{error, fmt};
 use crate::{db, email, helpers, models, password_hash_version};
+use chrono::prelude::{DateTime, Utc};
 use helpers::SessType;
 use db::{Action, Response, DBError};
 use password_hash_version::PWHashError;
@@ -135,6 +136,21 @@ async fn authenticate_gen(sess_type: SessType, db: db::Db, form_dat: models::Aut
         Ok(false) => Err(Rejections::InvalidPassword.into()),
         Err(err) => Err(Rejections::from(err).into())
     }
+}
+
+pub async fn get_status_report(startup_time: DateTime<Utc>,
+        _db: db::Db, email_inst: email::Email)
+    -> Result<impl Reply, Rejection>
+{
+    let (email_status_tx, mut email_status_rx) = tokio::sync::mpsc::channel(1);
+    email_inst.please(email::Action::GetStatusReport(email_status_tx)).await;
+
+    let email_status_report = match email_status_rx.recv().await {
+        Some(report) => format!("{}", report),
+        None => format!("Report error: channel closed"),
+    };
+
+    Ok(warp::reply::html(format!("Startup time: {}\nVersion: {}\n{}", startup_time, helpers::VERSION,  email_status_report)))
 }
 
 pub async fn create_account(db: db::Db, email_inst: email::Email,

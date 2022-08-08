@@ -1,4 +1,4 @@
-## Running
+#Running
 
 ### Frontend
 
@@ -18,7 +18,7 @@ Install sass by running `npm install sass` in the frontend directory.  Then run 
 
 ### Backend
 
-Run in the docker container: `./build_backend_container.sh`
+Run in the docker folder: `./build_backend_container.sh`
 
 Then push the resulting container to docker hub so you can pull it back down with the `production-docker-compose.yml`.
 
@@ -49,6 +49,22 @@ Now restore the backup:
 Remove the backup file from the container:
 
 `rm /tmp/db_backup`
+
+## Testing
+
+### Backend
+
+There are docker compose files setup to simplify testing of the backend.  You'll need to have secrets files in the docker directory: db_password.secret, smtp_server.secret, smtp_port.secret, smtp_username.secret, smtp_password.secret, and email_from.secret.  These are just plaintext - do not commit them into git.
+
+Setup an AWS SMTP credential w/IAM policy that only lets you email to your testing address, and use that in the smtp settings.  AWS has some info about how to set that policy [here](https://docs.aws.amazon.com/ses/latest/dg/control-user-access.html).
+
+Change the testing-docker-compose.yml FRONTEND_LOC to be an IP address you can connect to the server via (your local IP address).
+
+Run `docker-compose -f testing-docker-compose.yml up -d` from the docker directory.
+
+Browse to the FRONTEND_LOC you set in a browser.
+
+There's also a (currently very partial) backend_tester python script.
 
 ## Credits
 

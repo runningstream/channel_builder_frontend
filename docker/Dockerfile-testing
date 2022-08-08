@@ -2,7 +2,7 @@
 
 FROM debian:stable-slim
 
-RUN set -eux; apt-get update; apt-get install -y --no-install-recommends libpq5 libc6 libgcc1
+RUN set -eux; apt-get update; apt-get install -y --no-install-recommends libpq5 libc6 libgcc1 libssl-dev
 
 COPY frontend/content/ /usr/local/share/channel_builder/static_files/
 COPY backend/target/debug/channel_builder /usr/local/bin
