@@ -1,10 +1,12 @@
 use std::{error, fmt};
+use std::sync::{Arc};
 use crate::{db, email, helpers, models, password_hash_version};
 use chrono::prelude::{DateTime, Utc};
 use helpers::SessType;
 use db::{Action, Response, DBError};
 use password_hash_version::PWHashError;
 use rand::Rng;
+use tokio::sync::Mutex;
 use warp::http::StatusCode;
 use warp::{reject, Reply, Rejection};
 
@@ -65,26 +67,142 @@ impl Rejections {
     }
 }
 
-pub async fn authenticate_ro(db: db::Db, form_dat: models::AuthForm)
+#[derive(Clone)]
+pub struct StatusReportWrapper {
+    inner_report: Arc<Mutex<InnerStatusReport>>,
+}
+
+impl StatusReportWrapper {
+    pub fn new() -> Self {
+        Self {
+            inner_report: Arc::new(Mutex::new(InnerStatusReport::default())),
+        }
+    }
+
+    pub async fn mod_report(&self, mod_func: fn(&mut InnerStatusReport) -> ()) -> () {
+        mod_func(&mut *self.inner_report.lock().await)
+    }
+
+    pub async fn read_report(&self) -> InnerStatusReport {
+        *self.inner_report.lock().await
+    }
+}
+
+#[derive(Debug, Copy, Clone, Default)]
+pub struct InnerStatusReport {
+    // Counts of times the API was triggered
+    authenticate: u32,
+    authenticate_ro: u32,
+    authenticate_fe: u32,
+    get_status_report: u32,
+    create_account: u32,
+    validate_account: u32,
+    validate_session_fe: u32,
+    validate_session_ro: u32,
+    logout_session_fe: u32,
+    get_channel_lists: u32,
+    get_channel_list: u32,
+    get_channel_xml_ro: u32,
+    set_channel_list: u32,
+    create_channel_list: u32,
+    set_active_channel: u32,
+
+    // Other status
+    auth_success: u32,
+    account_created: u32,
+}
+
+impl fmt::Display for InnerStatusReport {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, concat!(
+                "API Handler Status Report:\n",
+                "  Authentications: {}\n",
+                "    Successful: {}\n",
+                "    Roku Auths: {}\n",
+                "    Frontend Auths: {}\n",
+                "  Account Creations: {}\n",
+                "    Attempted: {}\n",
+                "  Validations:\n",
+                "    Account: {}\n",
+                "    Frontend: {}\n",
+                "    Roku: {}\n",
+                "  Logouts:\n",
+                "    Frontend: {}\n",
+                "  Channel Stuff:\n",
+                "    Create: {}\n",
+                "    Set Active: {}\n",
+                "    Change Content: {}\n",
+                "    Get Content: {}\n",
+                "    Get XML Content Roku: {}\n",
+                "    Get Channel Lists: {}\n",
+                "  Status Reports: {}\n"
+                ),
+            self.authenticate, self.auth_success,
+            self.authenticate_ro, self.authenticate_fe,
+            self.account_created, self.create_account,
+            self.validate_account, self.validate_session_fe,
+            self.validate_session_ro, self.logout_session_fe,
+            self.create_channel_list, self.set_active_channel,
+            self.set_channel_list, self.get_channel_list,
+            self.get_channel_xml_ro, self.get_channel_lists,
+            self.get_status_report
+        )
+    }
+}
+
+#[derive(Clone)]
+pub struct APIParams {
+    db: db::Db,
+    email: email::Email,
+    // API Status Report
+    a_s_r: StatusReportWrapper,
+}
+
+impl APIParams {
+    pub fn new(db: db::Db, email: email::Email) -> Self {
+        let a_s_r = StatusReportWrapper::new();
+        Self {
+            db,
+            email,
+            a_s_r,
+        }
+    }
+}
+
+pub async fn authenticate_ro(params: APIParams, form_dat: models::AuthForm)
     -> Result<impl Reply, Rejection>
 {
     trace!("Starting authenticate_ro");
-    authenticate_gen(SessType::Roku, db, form_dat).await
+    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        report.authenticate_ro += 1;
+    }).await;
+
+    authenticate_gen(SessType::Roku, params, form_dat).await
 }
 
-pub async fn authenticate_fe(db: db::Db, form_dat: models::AuthForm)
+pub async fn authenticate_fe(params: APIParams, form_dat: models::AuthForm)
     -> Result<impl Reply, Rejection>
 {
     trace!("Starting authenticate_fe");
-    authenticate_gen(SessType::Frontend, db, form_dat).await
+    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        report.authenticate_fe += 1;
+    }).await;
+
+    authenticate_gen(SessType::Frontend, params, form_dat).await
 }
 
-async fn authenticate_gen(sess_type: SessType, db: db::Db, form_dat: models::AuthForm)
+async fn authenticate_gen(sess_type: SessType, params: APIParams,
+        form_dat: models::AuthForm
+    )
     -> Result<impl Reply, Rejection>
 {
     trace!("Starting authenticate_gen");
+    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        report.authenticate += 1;
+    }).await;
+
     let (pass_hash, hash_ver, valid_status) = 
-        match db.please(Action::GetUserPassHash {
+        match params.db.please(Action::GetUserPassHash {
             user: form_dat.username.clone(),
         }).await {
             Ok(Response::UserPassHash(pass_hash, hash_ver, valid_status)) => 
@@ -93,14 +211,23 @@ async fn authenticate_gen(sess_type: SessType, db: db::Db, form_dat: models::Aut
             Err(err) => Err(Rejections::from(err)),
         }?;
 
-
     if !valid_status {
         return Err(Rejections::InvalidUserNonValidated.into());
     }
 
+    // TODO - I was authenticating the password after making the session key
+    // that didn't seem to make sense.  Now make sure this version makes sense...
+    match password_hash_version::validate_pw_ver(&form_dat.username,
+        &form_dat.password, &pass_hash, hash_ver)
+    {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(Rejections::InvalidPassword),
+        Err(err) => Err(Rejections::from(err))
+    }?;
+
     let sess_key = gen_large_rand_str();
 
-    match db.please(Action::AddSessKey {
+    match params.db.please(Action::AddSessKey {
         user: form_dat.username.clone(),
         sess_type: sess_type.clone(),
         sess_key: sess_key.clone(),
@@ -119,44 +246,65 @@ async fn authenticate_gen(sess_type: SessType, db: db::Db, form_dat: models::Aut
 
     trace!("Session key: {}", sess_key.clone());
 
-    // TODO - why do I authenticate the password after making the session key?
-    // that doesn't seem to make sense
+    // Keep a status report of this success
+    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        report.auth_success += 1;
+    }).await;
 
-    match password_hash_version::validate_pw_ver(&form_dat.username,
-        &form_dat.password, &pass_hash, hash_ver)
-    {
-        Ok(true) =>
-            Ok(warp::reply::with_header(
-                base_reply,
-                "Set-Cookie", 
-                format!("{}={}; Max-Age={}; SameSite=Lax", 
-                    helpers::SESSION_COOKIE_NAME, sess_key,
-                    sess_type.get_max_age().num_seconds())
-            )),
-        Ok(false) => Err(Rejections::InvalidPassword.into()),
-        Err(err) => Err(Rejections::from(err).into())
-    }
+    // Reply with success if we made it here
+    Ok(warp::reply::with_header(
+        base_reply,
+        "Set-Cookie",
+        format!("{}={}; Max-Age={}; SameSite=Lax",
+            helpers::SESSION_COOKIE_NAME, sess_key,
+            sess_type.get_max_age().num_seconds())
+    ))
 }
 
-pub async fn get_status_report(startup_time: DateTime<Utc>,
-        _db: db::Db, email_inst: email::Email)
+pub async fn get_status_report(startup_time: DateTime<Utc>, params: APIParams)
     -> Result<impl Reply, Rejection>
 {
-    let (email_status_tx, mut email_status_rx) = tokio::sync::mpsc::channel(1);
-    email_inst.please(email::Action::GetStatusReport(email_status_tx)).await;
+    trace!("Starting get_status_report");
+    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        report.get_status_report += 1;
+    }).await;
 
-    let email_status_report = match email_status_rx.recv().await {
-        Some(report) => format!("{}", report),
-        None => format!("Report error: channel closed"),
+    let email_status_report = match params.email.get_status_report().await {
+        Ok(report) => format!("{}", report),
+        Err(err) => format!("Email report error: {}", err),
     };
 
-    Ok(warp::reply::html(format!("Startup time: {}\nVersion: {}\n{}", startup_time, helpers::VERSION,  email_status_report)))
+    let db_status_report = match params.db.please(Action::GetStatusReport).await {
+        Ok(Response::StatusReport(report)) => format!("{}", report),
+        Ok(resp) => format!("Database responded wrong type: {:?}", resp),
+        Err(err) => format!("Database report error: {}", err),
+    };
+
+    let api_status_report = params.a_s_r.read_report().await;
+
+    Ok(warp::reply::html(format!(
+            concat!(
+                "Startup time: {}\n",
+                "Version: {}\n",
+                "{}\n",
+                "{}\n",
+                "{}",
+            ),
+            startup_time, helpers::VERSION,
+            email_status_report, db_status_report, api_status_report
+            )
+        ))
 }
 
-pub async fn create_account(db: db::Db, email_inst: email::Email,
+pub async fn create_account(params: APIParams,
         form_dat: models::CreateAcctForm)
     -> Result<impl Reply, Rejection>
 {
+    trace!("Starting create_account");
+    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        report.create_account += 1;
+    }).await;
+
     // Fail early if the username is invalid
     email::parse_addr(&form_dat.username)
         .map_err(|_| {Rejections::InvalidEmailAddr})?;
@@ -175,7 +323,7 @@ pub async fn create_account(db: db::Db, email_inst: email::Email,
 
     let pw_hash_ver = password_hash_version::get_pw_ver();
 
-    let user_id = match db.please(Action::AddUser {
+    let user_id = match params.db.please(Action::AddUser {
         user: form_dat.username.clone(),
         pass_hash: pw_hash,
         pass_hash_ver: pw_hash_ver,
@@ -186,7 +334,7 @@ pub async fn create_account(db: db::Db, email_inst: email::Email,
         Err(err) => Err(Rejections::from(err)),
     }?;
 
-    email_inst.please(email::Action::SendRegAcct(
+    params.email.please(email::Action::SendRegAcct(
         email::RegisterData {
             dest_addr: form_dat.username,
             reg_key: reg_key,
@@ -195,7 +343,7 @@ pub async fn create_account(db: db::Db, email_inst: email::Email,
 
     let first_chan_nm = "First Channel";
 
-    let first_chan_success = match db.please(Action::CreateChannelList {
+    let first_chan_success = match params.db.please(Action::CreateChannelList {
         user_id: user_id,
         list_name: first_chan_nm.into(),
     }).await {
@@ -207,7 +355,7 @@ pub async fn create_account(db: db::Db, email_inst: email::Email,
     };
 
     if first_chan_success {
-        match db.please(Action::SetActiveChannel {
+        match params.db.please(Action::SetActiveChannel {
             user_id: user_id,
             list_name: first_chan_nm.into(),
         }).await {
@@ -218,14 +366,22 @@ pub async fn create_account(db: db::Db, email_inst: email::Email,
         }
     }
 
+    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        report.account_created += 1;
+    }).await;
+
     Ok(StatusCode::OK)
 }
 
-pub async fn validate_account(db: db::Db,
-    opts: models::ValidateAccountRequest)
+pub async fn validate_account(params: APIParams, opts: models::ValidateAccountRequest)
     -> Result<impl Reply, Rejection>
 {
-    match db.please(Action::ValidateAccount { val_code: opts.val_code }).await {
+    trace!("Starting validate_account");
+    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        report.validate_account += 1;
+    }).await;
+
+    match params.db.please(Action::ValidateAccount { val_code: opts.val_code }).await {
         Ok(Response::Bool(true)) => Ok(StatusCode::OK),
         Ok(resp) => Err(Rejections::db_api_err("ValidateAccount", resp).into()),
         Err(err) => Err(Rejections::from(err).into()),
@@ -233,19 +389,29 @@ pub async fn validate_account(db: db::Db,
     
 }
 
-pub async fn validate_session_fe(db: db::Db, sess_info: (String, i32))
+pub async fn validate_session_fe(params: APIParams, sess_info: (String, i32))
     -> Result<impl Reply, Rejection>
 {
-    validate_session(SessType::Frontend, db, sess_info).await
+    trace!("Starting validate_session_fe");
+    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        report.validate_session_fe += 1;
+    }).await;
+
+    validate_session(SessType::Frontend, params, sess_info).await
 }
 
-pub async fn validate_session_ro(db: db::Db, sess_info: (String, i32))
+pub async fn validate_session_ro(params: APIParams, sess_info: (String, i32))
     -> Result<impl Reply, Rejection>
 {
-    validate_session(SessType::Roku, db, sess_info).await
+    trace!("Starting validate_session_ro");
+    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        report.validate_session_ro += 1;
+    }).await;
+
+    validate_session(SessType::Roku, params, sess_info).await
 }
 
-async fn validate_session(_sess_type: SessType, _db: db::Db,
+async fn validate_session(_sess_type: SessType, _params: APIParams,
     _sess_info: (String, i32))
     -> Result<impl Reply, Rejection>
 {
@@ -253,11 +419,12 @@ async fn validate_session(_sess_type: SessType, _db: db::Db,
     Ok(StatusCode::OK)
 }
 
-pub async fn retrieve_session_dat(session_id: String, db: db::Db, sess_type: SessType)
+pub async fn retrieve_session_dat(session_id: String, params: APIParams, sess_type: SessType)
     -> Result<(String, i32), Rejection>
 {
     trace!("Starting retrieve_session_dat");
-    match db.please(Action::ValidateSessKey {
+
+    match params.db.please(Action::ValidateSessKey {
         sess_type: sess_type,
         sess_key: session_id.clone(),
     }).await {
@@ -270,12 +437,17 @@ pub async fn retrieve_session_dat(session_id: String, db: db::Db, sess_type: Ses
     }
 }
 
-pub async fn logout_session_fe(db: db::Db, sess_info: (String, i32))
+pub async fn logout_session_fe(params: APIParams, sess_info: (String, i32))
     -> Result<impl Reply, Rejection>
 {
+    trace!("Beginning logout_session_fe");
+    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        report.logout_session_fe += 1;
+    }).await;
+
     let (sess_key, _user_id) = sess_info;
 
-    match db.please(Action::LogoutSessKey {
+    match params.db.please(Action::LogoutSessKey {
         sess_type: SessType::Frontend,
         sess_key: sess_key,
     }).await {
@@ -285,12 +457,17 @@ pub async fn logout_session_fe(db: db::Db, sess_info: (String, i32))
     }
 }
 
-pub async fn get_channel_lists(db: db::Db, sess_info: (String, i32))
+pub async fn get_channel_lists(params: APIParams, sess_info: (String, i32))
     -> Result<impl Reply, Rejection>
 {
+    trace!("Beginning get_channel_lists");
+    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        report.get_channel_lists += 1;
+    }).await;
+
     let (_sess_key, user_id) = sess_info;
 
-    match db.please(Action::GetChannelLists {
+    match params.db.please(Action::GetChannelLists {
         user_id: user_id,
     }).await {
         Ok(Response::StringResp(val)) => Ok(warp::reply::html(val)),
@@ -299,13 +476,18 @@ pub async fn get_channel_lists(db: db::Db, sess_info: (String, i32))
     }
 }
 
-pub async fn get_channel_list(db: db::Db, sess_info: (String, i32), 
+pub async fn get_channel_list(params: APIParams, sess_info: (String, i32), 
     opts: models::GetChannelListQuery)
     -> Result<impl Reply, Rejection>
 {
+    trace!("Beginning get_channel_list");
+    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        report.get_channel_list += 1;
+    }).await;
+
     let (_sess_key, user_id) = sess_info;
 
-    match db.please(Action::GetChannelList {
+    match params.db.please(Action::GetChannelList {
         user_id: user_id,
         list_name: opts.list_name,
     }).await {
@@ -315,12 +497,17 @@ pub async fn get_channel_list(db: db::Db, sess_info: (String, i32),
     }
 }
 
-pub async fn get_channel_xml_ro(db: db::Db, sess_info: (String, i32)) 
+pub async fn get_channel_xml_ro(params: APIParams, sess_info: (String, i32)) 
     -> Result<impl Reply, Rejection>
 {
+    trace!("Beginning get_channel_xml_ro");
+    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        report.get_channel_xml_ro += 1;
+    }).await;
+
     let (_sess_key, user_id) = sess_info;
 
-    let channel_list = match db.please(Action::GetActiveChannel {
+    let channel_list = match params.db.please(Action::GetActiveChannel {
         user_id: user_id,
     }).await {
         Ok(Response::StringResp(val)) => Ok(val),
@@ -337,16 +524,21 @@ pub async fn get_channel_xml_ro(db: db::Db, sess_info: (String, i32))
     Ok(warp::reply::html(xml_str1))
 }
 
-pub async fn set_channel_list(db: db::Db, sess_info: (String, i32), 
+pub async fn set_channel_list(params: APIParams, sess_info: (String, i32), 
     form_dat: models::SetChannelListForm)
     -> Result<impl Reply, Rejection>
 {
+    trace!("Beginning set_channel_list");
+    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        report.set_channel_list += 1;
+    }).await;
+
     let (_sess_key, user_id) = sess_info;
 
     // TODO validate that input is json
     // TODO convert to XML now?
 
-    match db.please(Action::SetChannelList {
+    match params.db.please(Action::SetChannelList {
         user_id: user_id,
         list_name: form_dat.listname,
         list_data: form_dat.listdata,
@@ -357,13 +549,18 @@ pub async fn set_channel_list(db: db::Db, sess_info: (String, i32),
     }
 }
 
-pub async fn create_channel_list(db: db::Db, sess_info: (String, i32), 
+pub async fn create_channel_list(params: APIParams, sess_info: (String, i32), 
     form_dat: models::CreateChannelListForm)
     -> Result<impl Reply, Rejection>
 {
+    trace!("Beginning create_channel_list");
+    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        report.create_channel_list += 1;
+    }).await;
+
     let (_sess_key, user_id) = sess_info;
 
-    match db.please(Action::CreateChannelList {
+    match params.db.please(Action::CreateChannelList {
         user_id: user_id,
         list_name: form_dat.listname,
     }).await {
@@ -373,13 +570,18 @@ pub async fn create_channel_list(db: db::Db, sess_info: (String, i32),
     }
 }
 
-pub async fn set_active_channel(db: db::Db, sess_info: (String, i32), 
+pub async fn set_active_channel(params: APIParams, sess_info: (String, i32), 
     form_dat: models::SetActiveChannelForm)
     -> Result<impl Reply, Rejection>
 {
+    trace!("Beginning set_active_channel");
+    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        report.set_active_channel += 1;
+    }).await;
+
     let (_sess_key, user_id) = sess_info;
 
-    match db.please(Action::SetActiveChannel {
+    match params.db.please(Action::SetActiveChannel {
         user_id: user_id,
         list_name: form_dat.listname,
     }).await {
@@ -392,6 +594,8 @@ pub async fn set_active_channel(db: db::Db, sess_info: (String, i32),
 pub async fn validate_origin_or_referer(source: String, cors_origin: String)
     -> Result<(), Rejection>
 {
+    trace!("Beginning validate_origin_or_referer");
+
     if source.starts_with(&cors_origin) {
         Ok(())
     } else {
@@ -402,6 +606,8 @@ pub async fn validate_origin_or_referer(source: String, cors_origin: String)
 pub async fn handle_rejection(err: Rejection)
     -> Result<impl Reply, Rejection>
 {
+    trace!("Beginning handle_rejection");
+
     let code;
     let message;
 

@@ -1,12 +1,13 @@
 /// Manages all the database operations
 
+use std::fmt;
+use std::sync::mpsc;
 use crate::{db_models, helpers};
 use db_models::SessKeyCommon;
 use helpers::SessType;
 use diesel::pg::PgConnection;
 use diesel::Connection;
 use diesel::RunQueryDsl;
-use std::sync::mpsc;
 use tokio::task;
 use tokio::sync::oneshot;
 use chrono::Utc;
@@ -53,6 +54,66 @@ struct InThreadData {
     db_conn: PgConnection,
 }
 
+#[derive(Debug, Copy, Clone, Default)]
+pub struct StatusReport {
+    // Counts of times the function was triggered
+    add_user: u32,
+    validate_account: u32,
+    add_session_key: u32,
+    validate_session_key: u32,
+    logout_session_key: u32,
+    get_user_passhash: u32,
+    get_channel_lists: u32,
+    get_channel_list: u32,
+    set_channel_list: u32,
+    create_channel_list: u32,
+    get_active_channel: u32,
+    set_active_channel: u32,
+    get_status_report: u32,
+    
+    // Counts of other things
+    add_user_success: u32,
+    validate_acct_success: u32,
+    add_sess_key_success: u32,
+    validate_sess_key_success: u32,
+}
+
+impl fmt::Display for StatusReport {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, concat!(
+                "Database status report:\n",
+                "  Add User: {}\n",
+                "    Success: {}\n",
+                "  Validate User: {}\n",
+                "    Success: {}\n",
+                "  Add Session Key: {}\n",
+                "    Success: {}\n",
+                "  Validate Session Key: {}\n",
+                "    Success: {}\n",
+                "  Logout: {}\n",
+                "  Get User and Pass Hash: {}\n",
+                "  Channel List:\n",
+                "    List them: {}\n",
+                "    Get: {}\n",
+                "    Set: {}\n",
+                "    Create: {}\n",
+                "    Get Active: {}\n",
+                "    Set Active: {}\n",
+                "  Status Reports: {}",
+            ),
+            self.add_user, self.add_user_success,
+            self.validate_account, self.validate_acct_success,
+            self.add_session_key, self.add_sess_key_success,
+            self.validate_session_key, self.validate_sess_key_success,
+            self.logout_session_key, self.get_user_passhash,
+            self.get_channel_lists, self.get_channel_list,
+            self.set_channel_list, self.create_channel_list,
+            self.get_active_channel, self.set_active_channel,
+            self.get_status_report,
+        )
+    }
+}
+
 #[derive(Clone)]
 pub enum Action {
     AddUser { user: String, pass_hash: String, pass_hash_ver: i32, reg_key: String },
@@ -67,6 +128,7 @@ pub enum Action {
     CreateChannelList { user_id: i32, list_name: String },
     GetActiveChannel { user_id: i32 },
     SetActiveChannel { user_id: i32, list_name: String },
+    GetStatusReport,
 }
 
 #[derive(Clone,Debug)]
@@ -77,6 +139,7 @@ pub enum Response {
     UserID(i32),
     ValidatedKey(bool, i32),
     UserPassHash(String, i32, bool),
+    StatusReport(StatusReport),
 }
 
 struct Message {
@@ -148,6 +211,8 @@ impl Db {
     fn handle_db_calls(dat: InThreadData, db_rx: mpsc::Receiver<Message>)
         -> ()
     {
+        let mut s_r = StatusReport::default();
+
         while let Some(msg) = match db_rx.recv() {
             Ok(msg) => Some(msg),
             Err(_err) => {
@@ -156,30 +221,33 @@ impl Db {
         } {
             let result = match msg.action {
                 Action::AddUser { user, pass_hash, pass_hash_ver, reg_key }=>
-                    Self::add_user(&dat, user, pass_hash, pass_hash_ver, reg_key),
+                    Self::add_user(&dat, &mut s_r, user, pass_hash, pass_hash_ver, reg_key),
                 Action::ValidateAccount { val_code } =>
-                    Self::validate_account(&dat, val_code),
+                    Self::validate_account(&dat, &mut s_r, val_code),
                 Action::AddSessKey { user, sess_type, sess_key } =>
-                    Self::add_session_key(&dat, user, sess_type, sess_key),
+                    Self::add_session_key(&dat, &mut s_r, user, sess_type, sess_key),
                 Action::ValidateSessKey { sess_type, sess_key } =>
-                    Self::validate_session_key(&dat, sess_type, sess_key),
+                    Self::validate_session_key(&dat, &mut s_r, sess_type, sess_key),
                 Action::LogoutSessKey { sess_type, sess_key } =>
-                    Self::logout_session_key(&dat, sess_type, sess_key),
+                    Self::logout_session_key(&dat, &mut s_r, sess_type, sess_key),
                 Action::GetUserPassHash { user } =>
-                    Self::get_user_passhash(&dat, user),
+                    Self::get_user_passhash(&dat, &mut s_r, user),
                 Action::GetChannelLists { user_id } =>
-                    Self::get_channel_lists(&dat, user_id),
+                    Self::get_channel_lists(&dat, &mut s_r, user_id),
                 Action::GetChannelList { user_id, list_name } =>
-                    Self::get_channel_list(&dat, user_id, list_name),
+                    Self::get_channel_list(&dat, &mut s_r, user_id, list_name),
                 Action::SetChannelList { user_id, list_name, list_data } =>
-                    Self::set_channel_list(&dat, user_id, list_name, list_data),
+                    Self::set_channel_list(&dat, &mut s_r, user_id, list_name, list_data),
                 Action::CreateChannelList { user_id, list_name } =>
-                    Self::create_channel_list(&dat, user_id, list_name),
+                    Self::create_channel_list(&dat, &mut s_r, user_id, list_name),
                 Action::GetActiveChannel { user_id } =>
-                    Self::get_active_channel(&dat, user_id),
+                    Self::get_active_channel(&dat, &mut s_r, user_id),
                 Action::SetActiveChannel { user_id, list_name } =>
-                    Self::set_active_channel(&dat, user_id, list_name),
+                    Self::set_active_channel(&dat, &mut s_r, user_id, list_name),
+                Action::GetStatusReport =>
+                    Self::get_status_report(&mut s_r),
             };
+
             match msg.resp.send(result) {
                 Ok(_) => {},
                 Err(_) => {
@@ -189,10 +257,14 @@ impl Db {
         }
     }
 
-    fn add_user(dat: &InThreadData, user: String, pass_hash: String,
-            pass_hash_ver: i32, reg_key: String)
+    fn add_user(dat: &InThreadData, s_r: &mut StatusReport,
+            user: String, pass_hash: String,
+            pass_hash_ver: i32, reg_key: String
+        )
         -> Result<Response, DBError>
     {
+        s_r.add_user += 1;
+
         // Build the new user data
         let new_user = db_models::InsertUserData {
             username: &user,
@@ -210,12 +282,16 @@ impl Db {
                 .get_results(&dat.db_conn)
         )?;
 
+        s_r.add_user_success += 1;
+
         Ok(Response::UserID(user_ids[0]))
     }
 
-    fn validate_account(dat: &InThreadData, val_code: String)
+    fn validate_account(dat: &InThreadData, s_r: &mut StatusReport, val_code: String)
         -> Result<Response, DBError>
     {
+        s_r.validate_account += 1;
+
         // Find the user_data that matches the val_code if there is one
         let results = allow_only_one(
             ud_dsl.filter(user_data::validation_code.eq(val_code))
@@ -232,13 +308,17 @@ impl Db {
             ))
             .execute(&dat.db_conn))?;
 
+        s_r.validate_acct_success += 1;
+
         Ok(Response::Bool(true))
     }
 
-    fn add_session_key(dat: &InThreadData, user: String,
+    fn add_session_key(dat: &InThreadData, s_r: &mut StatusReport, user: String,
             sess_type: SessType, sess_key: String)
         -> Result<Response, DBError>
     {
+        s_r.add_session_key += 1;
+
         // Generate current time
         let time_now = Utc::now();
 
@@ -277,13 +357,17 @@ impl Db {
             }
         )?;
 
+        s_r.add_sess_key_success += 1;
+
         Ok(Response::Empty)
     }
 
-    fn validate_session_key(dat: &InThreadData, sess_type: SessType,
+    fn validate_session_key(dat: &InThreadData, s_r: &mut StatusReport, sess_type: SessType,
             sess_key: String)
         -> Result<Response, DBError>
     {
+        s_r.validate_session_key += 1;
+
         fn process_filt_result<T: SessKeyCommon>
             (filt_results: Result<Vec<T>, diesel::result::Error>)
             -> Result<db_models::SessKeyComponents, DBError>
@@ -346,13 +430,17 @@ impl Db {
             }
         )?;
 
+        s_r.validate_sess_key_success += 1;
+
         Ok(Response::ValidatedKey(true, result.userid))
     }
 
-    fn logout_session_key(dat: &InThreadData, sess_type: SessType,
+    fn logout_session_key(dat: &InThreadData, s_r: &mut StatusReport, sess_type: SessType,
             sess_key: String)
         -> Result<Response, DBError>
     {
+        s_r.logout_session_key += 1;
+
         match sess_type {
             SessType::Frontend => 
                 diesel::delete(fesk_dsl.filter(
@@ -367,9 +455,11 @@ impl Db {
         Ok(Response::Empty)
     }
 
-    fn get_user_passhash(dat: &InThreadData, user: String)
+    fn get_user_passhash(dat: &InThreadData, s_r: &mut StatusReport, user: String)
         -> Result<Response, DBError>
     {
+        s_r.get_user_passhash += 1;
+
         let results = allow_only_one(
             ud_dsl.filter(user_data::username.eq(user))
                 .limit(5)
@@ -383,9 +473,11 @@ impl Db {
         ))
     }
 
-    fn get_channel_lists(dat: &InThreadData, user_id: i32)
+    fn get_channel_lists(dat: &InThreadData, s_r: &mut StatusReport, user_id: i32)
         -> Result<Response, DBError>
     {
+        s_r.get_channel_lists += 1;
+
         let results = cl_dsl
             .filter(channel_list::userid.eq(user_id))
             .load::<db_models::QueryChannelList>(&dat.db_conn)?;
@@ -397,9 +489,13 @@ impl Db {
         Ok(Response::StringResp(serde_json::to_string(&channel_names)?))
     }
 
-    fn get_channel_list(dat: &InThreadData, user_id: i32, list_name: String)
+    fn get_channel_list(dat: &InThreadData, s_r: &mut StatusReport,
+            user_id: i32, list_name: String
+        )
         -> Result<Response, DBError>
     {
+        s_r.get_channel_list += 1;
+
         // Get the channel
         let results = allow_only_one(
             cl_dsl
@@ -412,10 +508,14 @@ impl Db {
         Ok(Response::StringResp(results[0].data.clone()))
     }
 
-    fn set_channel_list(dat: &InThreadData, user_id: i32, list_name: String,
-        list_data: String)
+    fn set_channel_list(dat: &InThreadData, s_r: &mut StatusReport,
+            user_id: i32, list_name: String,
+            list_data: String
+        )
         -> Result<Response, DBError>
     {
+        s_r.set_channel_list += 1;
+
         allow_only_one(
             diesel::update(cl_dsl
                 .filter(channel_list::userid.eq(user_id))
@@ -428,9 +528,13 @@ impl Db {
         Ok(Response::Empty)
     }
 
-    fn create_channel_list(dat: &InThreadData, user_id: i32, list_name: String)
+    fn create_channel_list(dat: &InThreadData, s_r: &mut StatusReport,
+            user_id: i32, list_name: String
+        )
         -> Result<Response, DBError>
     {
+        s_r.create_channel_list += 1;
+
         // See if the channel already exists
         match cl_dsl
             .filter(channel_list::userid.eq(user_id))
@@ -459,9 +563,11 @@ impl Db {
         Ok(Response::Empty)
     }
 
-    fn get_active_channel(dat: &InThreadData, user_id: i32)
+    fn get_active_channel(dat: &InThreadData, s_r: &mut StatusReport, user_id: i32)
         -> Result<Response, DBError>
     {
+        s_r.get_active_channel += 1;
+
         joinable!(user_data -> channel_list (active_channel) );
 
         let results = allow_only_one(
@@ -476,9 +582,13 @@ impl Db {
         Ok(Response::StringResp(results[0].clone()))
     }
 
-    fn set_active_channel(dat: &InThreadData, user_id: i32, list_name: String)
+    fn set_active_channel(dat: &InThreadData, s_r: &mut StatusReport,
+            user_id: i32, list_name: String
+        )
         -> Result<Response, DBError>
     {
+        s_r.set_active_channel += 1;
+
         // Get the channel
         let results = allow_only_one(
             cl_dsl
@@ -496,5 +606,13 @@ impl Db {
         )?;
 
         Ok(Response::Empty)
+    }
+
+    fn get_status_report(s_r: &mut StatusReport)
+        -> Result<Response, DBError>
+    {
+        s_r.get_status_report += 1;
+
+        Ok(Response::StatusReport(*s_r))
     }
 }

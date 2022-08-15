@@ -2,8 +2,9 @@
 
 use std::{time, fmt};
 use std::sync::{Arc, mpsc};
+use thiserror::Error;
 use tokio::task;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, oneshot};
 use lettre::transport::smtp::{authentication, client};
 use lettre::message::{MultiPart, Mailbox};
 use lettre::address::AddressError;
@@ -14,6 +15,15 @@ const EMAIL_PERIOD: u64 = 1; // seconds between trying to send email
 pub fn parse_addr(addr: &str) -> Result<Mailbox, AddressError> {
     let address: Address = addr.parse()?;
     Ok(Mailbox::new(None, address))
+}
+
+#[derive(Error, Debug)]
+pub enum EmailError {
+    #[error("error getting oneshot result: {source}")]
+    ThreadResponseFailure {
+        #[from]
+        source: oneshot::error::RecvError,
+    },
 }
 
 #[derive(Clone)]
@@ -44,20 +54,30 @@ pub struct StatusReport {
     fails_parse_email: u32,
     fails_msg_build: u32,
     fails_sending: u32,
+    status_report: u32,
 }
 
 impl fmt::Display for StatusReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Email status report:\n  Successes: {}\n  Fails:\n    Parsing addrs: {}\n    Building message: {}\n    Sending: {}",
+        write!(f, concat!(
+                "Email status report:\n",
+                "  Successes: {}\n",
+                "  Fails:\n",
+                "    Parsing addrs: {}\n",
+                "    Building message: {}\n",
+                "    Sending: {}\n",
+                "  Status Reports: {}",
+            ),
             self.successes, self.fails_parse_email,
-            self.fails_msg_build, self.fails_sending)
+            self.fails_msg_build, self.fails_sending,
+            self.status_report,
+        )
     }
 }
 
-#[derive(Clone)]
 pub enum Action {
     SendRegAcct(RegisterData),
-    GetStatusReport(tokio::sync::mpsc::Sender<StatusReport>),
+    GetStatusReport(oneshot::Sender<StatusReport>),
 }
 
 impl Email {
@@ -110,6 +130,14 @@ impl Email {
         }
     }
 
+    pub async fn get_status_report(&self) -> Result<StatusReport,EmailError> {
+        let (tx, rx) = oneshot::channel();
+
+        self.please(Action::GetStatusReport(tx)).await;
+
+        Ok(rx.await?)
+    }
+
     fn handle_emails(dat: InThreadData, email_rx: mpsc::Receiver<Action>) -> () {
         let sleep_time = time::Duration::from_secs(EMAIL_PERIOD);
 
@@ -142,20 +170,20 @@ impl Email {
                     panic!("Email sender disconnected!");
                 },
             } {
-                status_report = match msg {
+                match msg {
                     Action::SendRegAcct(reg_dat) => 
-                        Self::send_reg_acct(status_report, smtp.clone(),
+                        Self::send_reg_acct(&mut status_report, smtp.clone(),
                             dat.clone(), reg_dat),
                     Action::GetStatusReport(sender) =>
-                        Self::get_status_report(status_report, sender),
+                        Self::action_get_status_report(&mut status_report, sender),
                 }
             }
         }
     }
 
-    fn send_reg_acct(mut status_report: StatusReport, smtp: lettre::SmtpTransport,
+    fn send_reg_acct(status_report: &mut StatusReport, smtp: lettre::SmtpTransport,
             dat: InThreadData, reg_dat: RegisterData)
-        -> StatusReport
+        -> ()
     {
         let text_msg = format!("Welcome to Running Stream - build your own Roku channel!  Please paste the following link into your browser to complete registration {}/?val_code={} - if you did not attempt to register at Running Stream please just delete this email.", dat.frontend_loc_str, reg_dat.reg_key);
         let html_msg = format!("<p>Welcome to Running Stream - build your own Roku channel!</p>  <p><a href=\"{}/?val_code={}\">Please click here to complete registration</a></p>  <p>If you did not attempt to register at Running Stream please just delete this email.</p>", dat.frontend_loc_str, reg_dat.reg_key);
@@ -167,7 +195,7 @@ impl Email {
                     reg_dat.dest_addr, err);
                 status_report.fails_parse_email += 1;
 
-                return status_report;
+                return;
             },
         };
 
@@ -182,8 +210,8 @@ impl Email {
             Err(err) => {
                 error!("Failed to build message: {:?}", err);
                 status_report.fails_msg_build += 1;
-
-                return status_report;
+                
+                return;
             },
         };
 
@@ -197,18 +225,19 @@ impl Email {
                 status_report.fails_sending += 1;
             },
         };
-
-        return status_report;
     }
 
-    fn get_status_report(status_report: StatusReport,
-            sender: tokio::sync::mpsc::Sender<StatusReport>)
-        -> StatusReport
+    fn action_get_status_report(status_report: &mut StatusReport,
+            sender: oneshot::Sender<StatusReport>)
+        -> ()
     {
-        match sender.blocking_send(status_report) {
+        status_report.status_report += 1;
+
+        match sender.send(*status_report) {
             Ok(_) => (),
-            Err(err) => {warn!("Error sending status report: {}", err);},
+            Err(err) => {
+                error!("Error sending status report: {}", err);
+            },
         }
-        status_report
     }
 }

@@ -69,16 +69,17 @@ async fn main() {
         "postgres", db_password, db_host);
     let db = db::Db::new(&db_url);
 
-    // Setup email handler?
+    // Setup email handler
     let email = email::Email::new(smtp_server, smtp_port, smtp_username,
         smtp_password, email_from, frontend_loc.clone());
 
     info!("channel_builder version {}", helpers::VERSION);
     info!("channel_builder startup time {}", startup_time); 
 
-    let api = api::build_filters(db, email, frontend_loc, startup_time);
     let server_sockaddr: std::net::SocketAddr = server_address
         .parse()
         .expect("Unable to parse socket address");
-    warp::serve(api).run(server_sockaddr).await;
+    let api_params = api::APIParams::new(db, email);
+    let api_filters = api::build_filters(api_params, frontend_loc, startup_time);
+    warp::serve(api_filters).run(server_sockaddr).await;
 }

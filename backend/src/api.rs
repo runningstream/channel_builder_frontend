@@ -1,4 +1,5 @@
-use crate::{api_handlers, db, helpers, email, models};
+use crate::{api_handlers, helpers, models};
+pub use api_handlers::APIParams;
 use chrono::prelude::{DateTime, Utc};
 use helpers::{SessType, SESSION_COOKIE_NAME};
 use warp::{Filter, Reply, Rejection};
@@ -8,8 +9,9 @@ const MAX_AUTH_FORM_LEN: u64 = 1024 * 256;
 
 pub const LOG_KEY: &str = "backend";
 
-pub fn build_filters(db: db::Db, email: email::Email, cors_origin: String,
-        startup_time: DateTime<Utc>)
+pub fn build_filters(params: APIParams,
+        cors_origin: String, startup_time: DateTime<Utc>
+    )
     -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
 {
     // Setup warp's built in CORS
@@ -20,22 +22,22 @@ pub fn build_filters(db: db::Db, email: email::Email, cors_origin: String,
 
     // Permit Roku endpoints and status to avoid origin_referer_filt
     // Require browser endpoints to meet that filter requirement
-    api_authenticate_ro(db.clone())
-        .or(api_validate_session_ro(db.clone()))
-        .or(api_get_channel_xml_ro(db.clone()))
-        .or(api_get_status_report(startup_time, db.clone(), email.clone()))
+    api_authenticate_ro(params.clone())
+        .or(api_validate_session_ro(params.clone()))
+        .or(api_get_channel_xml_ro(params.clone()))
+        .or(api_get_status_report(startup_time, params.clone()))
         .or(
             origin_referer_filt(cors_origin.clone()).and(
-                api_authenticate_fe(db.clone())
-                    .or(api_create_account(db.clone(), email.clone()))
-                    .or(api_validate_account(db.clone()))
-                    .or(api_logout_session_fe(db.clone()))
-                    .or(api_get_channel_lists(db.clone()))
-                    .or(api_get_channel_list(db.clone()))
-                    .or(api_set_channel_list(db.clone()))
-                    .or(api_create_channel_list(db.clone()))
-                    .or(api_set_active_channel(db.clone()))
-                    .or(api_validate_session_fe(db.clone()))
+                api_authenticate_fe(params.clone())
+                    .or(api_create_account(params.clone()))
+                    .or(api_validate_account(params.clone()))
+                    .or(api_logout_session_fe(params.clone()))
+                    .or(api_get_channel_lists(params.clone()))
+                    .or(api_get_channel_list(params.clone()))
+                    .or(api_set_channel_list(params.clone()))
+                    .or(api_create_channel_list(params.clone()))
+                    .or(api_set_active_channel(params.clone()))
+                    .or(api_validate_session_fe(params.clone()))
             )
         )
         //.or(serve_static_index())
@@ -60,14 +62,14 @@ fn serve_static_files()
 }
 */
 
-fn api_authenticate_fe(db: db::Db)
+fn api_authenticate_fe(params: APIParams)
     -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
 {
     // TODO do I return neutral responses when email doesn't exist vs
     // bad auth?
     api_v1_path("authenticate_fe")
         .and(warp::post())
-        .and(add_in(db))
+        .and(add_in(params))
         .and(get_form::<models::AuthForm>())
         .and_then(api_handlers::authenticate_fe)
 }
@@ -86,142 +88,140 @@ fn origin_referer_filt(cors_origin: String)
         .untuple_one()
 }
 
-fn api_authenticate_ro(db: db::Db)
+fn api_authenticate_ro(params: APIParams)
     -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
 {
     // TODO do I return neutral responses when email doesn't exist vs
     // bad auth?
     api_v1_path("authenticate_ro")
         .and(warp::post())
-        .and(add_in(db))
+        .and(add_in(params))
         .and(get_form::<models::AuthForm>())
         .and_then(api_handlers::authenticate_ro)
 }
 
-fn api_create_account(db: db::Db, email: email::Email)
+fn api_create_account(params: APIParams)
     -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
 {
     // TODO Do I return neutral responses when the email already exists - failed?
     api_v1_path("create_account")
         .and(warp::post())
-        .and(add_in(db))
-        .and(add_in(email))
+        .and(add_in(params))
         .and(get_form::<models::CreateAcctForm>())
         .and_then(api_handlers::create_account)
 }
 
-fn api_validate_account(db: db::Db)
+fn api_validate_account(params: APIParams)
     -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
 {
     api_v1_path("validate_account")
         .and(warp::get())
-        .and(add_in(db))
+        .and(add_in(params))
         .and(warp::query::<models::ValidateAccountRequest>())
         .and_then(api_handlers::validate_account)
 }
 
-fn api_validate_session_fe(db: db::Db)
+fn api_validate_session_fe(params: APIParams)
     -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
 {
     api_v1_path("validate_session_fe")
         .and(warp::get())
-        .and(add_in(db.clone()))
-        .and(validate_session(SessType::Frontend, db))
+        .and(add_in(params.clone()))
+        .and(validate_session(SessType::Frontend, params))
         .and_then(api_handlers::validate_session_fe)
 }
 
-fn api_validate_session_ro(db: db::Db)
+fn api_validate_session_ro(params: APIParams)
     -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
 {
     api_v1_path("validate_session_ro")
         .and(warp::get())
-        .and(add_in(db.clone()))
-        .and(validate_session(SessType::Roku, db))
+        .and(add_in(params.clone()))
+        .and(validate_session(SessType::Roku, params))
         .and_then(api_handlers::validate_session_ro)
 }
 
-fn api_logout_session_fe(db: db::Db)
+fn api_logout_session_fe(params: APIParams)
     -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
 {
     api_v1_path("logout_session_fe")
         .and(warp::get())
-        .and(add_in(db.clone()))
-        .and(validate_session(SessType::Frontend, db))
+        .and(add_in(params.clone()))
+        .and(validate_session(SessType::Frontend, params))
         .and_then(api_handlers::logout_session_fe)
 }
 
-fn api_get_channel_lists(db: db::Db)
+fn api_get_channel_lists(params: APIParams)
     -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
 {
     api_v1_path("get_channel_lists")
         .and(warp::get())
-        .and(add_in(db.clone()))
-        .and(validate_session(SessType::Frontend, db))
+        .and(add_in(params.clone()))
+        .and(validate_session(SessType::Frontend, params))
         .and_then(api_handlers::get_channel_lists)
 }
 
-fn api_get_channel_list(db: db::Db)
+fn api_get_channel_list(params: APIParams)
     -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
 {
     api_v1_path("get_channel_list")
         .and(warp::get())
-        .and(add_in(db.clone()))
-        .and(validate_session(SessType::Frontend, db))
+        .and(add_in(params.clone()))
+        .and(validate_session(SessType::Frontend, params))
         .and(warp::query::<models::GetChannelListQuery>())
         .and_then(api_handlers::get_channel_list)
 }
 
-fn api_get_channel_xml_ro(db: db::Db)
+fn api_get_channel_xml_ro(params: APIParams)
     -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
 {
     api_v1_path("get_channel_xml_ro")
         .and(warp::get())
-        .and(add_in(db.clone()))
-        .and(validate_session(SessType::Roku, db))
+        .and(add_in(params.clone()))
+        .and(validate_session(SessType::Roku, params))
         .and_then(api_handlers::get_channel_xml_ro)
 }
 
-fn api_set_channel_list(db: db::Db)
+fn api_set_channel_list(params: APIParams)
     -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
 {
     api_v1_path("set_channel_list")
         .and(warp::post())
-        .and(add_in(db.clone()))
-        .and(validate_session(SessType::Frontend, db))
+        .and(add_in(params.clone()))
+        .and(validate_session(SessType::Frontend, params))
         .and(get_form::<models::SetChannelListForm>())
         .and_then(api_handlers::set_channel_list)
 }
 
-fn api_create_channel_list(db: db::Db)
+fn api_create_channel_list(params: APIParams)
     -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
 {
     api_v1_path("create_channel_list")
         .and(warp::post())
-        .and(add_in(db.clone()))
-        .and(validate_session(SessType::Frontend, db))
+        .and(add_in(params.clone()))
+        .and(validate_session(SessType::Frontend, params))
         .and(get_form::<models::CreateChannelListForm>())
         .and_then(api_handlers::create_channel_list)
 }
 
-fn api_set_active_channel(db: db::Db)
+fn api_set_active_channel(params: APIParams)
     -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
 {
     api_v1_path("set_active_channel")
         .and(warp::post())
-        .and(add_in(db.clone()))
-        .and(validate_session(SessType::Frontend, db))
+        .and(add_in(params.clone()))
+        .and(validate_session(SessType::Frontend, params))
         .and(get_form::<models::SetActiveChannelForm>())
         .and_then(api_handlers::set_active_channel)
 }
 
-fn api_get_status_report(startup_time: DateTime<Utc>, db: db::Db, email: email::Email)
+fn api_get_status_report(startup_time: DateTime<Utc>, params: APIParams)
     -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
 {
     api_v1_path("status_report")
         .and(warp::get())
         .and(add_in(startup_time))
-        .and(add_in(db))
-        .and(add_in(email))
+        .and(add_in(params))
         .and_then(api_handlers::get_status_report)
 }
 
@@ -235,11 +235,11 @@ fn get_form<T>()
         .and(warp::body::form())
 }
 
-fn validate_session(sess_type: SessType, db: db::Db)
+fn validate_session(sess_type: SessType, params: APIParams)
     -> impl Filter<Extract = ((String, i32),), Error = Rejection> + Clone
 {
     warp::filters::cookie::cookie::<String>(SESSION_COOKIE_NAME)
-        .and(add_in(db))
+        .and(add_in(params))
         .and(add_in(sess_type))
         .and_then(
             api_handlers::retrieve_session_dat
