@@ -1,5 +1,5 @@
 use crate::{api_handlers, helpers, models};
-pub use api_handlers::APIParams;
+pub use api_handlers::{APIParams, orderly_shutdown};
 use chrono::prelude::{DateTime, Utc};
 use helpers::{SessType, SESSION_COOKIE_NAME};
 use warp::{Filter, Reply, Rejection};
@@ -25,6 +25,7 @@ pub fn build_filters(params: APIParams,
     api_authenticate_ro(params.clone())
         .or(api_validate_session_ro(params.clone()))
         .or(api_get_channel_xml_ro(params.clone()))
+        .or(api_refresh_session_ro(params.clone()))
         .or(api_get_status_report(startup_time, params.clone()))
         .or(
             origin_referer_filt(cors_origin.clone()).and(
@@ -180,6 +181,16 @@ fn api_get_channel_xml_ro(params: APIParams)
         .and(add_in(params.clone()))
         .and(validate_session(SessType::Roku, params))
         .and_then(api_handlers::get_channel_xml_ro)
+}
+
+fn api_refresh_session_ro(params: APIParams)
+    -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
+{
+    api_v1_path("refresh_session_ro")
+        .and(warp::get())
+        .and(add_in(params.clone()))
+        .and(validate_session(SessType::Roku, params))
+        .and_then(api_handlers::refresh_session_ro)
 }
 
 fn api_set_channel_list(params: APIParams)

@@ -3,6 +3,7 @@
 #[macro_use] extern crate log;
 
 use chrono::prelude::Utc;
+use tokio::signal::unix::{signal, SignalKind};
 
 pub mod schema;
 pub mod db_models;
@@ -64,6 +65,14 @@ async fn main() {
     }
     pretty_env_logger::init();
 
+    // Setup a SIGTERM handler
+    let mut sig_stream = signal(SignalKind::terminate()).expect("Signal setup failed!");
+
+    // Setup the socket
+    let server_sockaddr: std::net::SocketAddr = server_address
+        .parse()
+        .expect("Unable to parse socket address");
+
     // Setup DB with arc mutex
     let db_url = format!("postgres://{}:{}@{}/roku_channel_builder",
         "postgres", db_password, db_host);
@@ -73,13 +82,21 @@ async fn main() {
     let email = email::Email::new(smtp_server, smtp_port, smtp_username,
         smtp_password, email_from, frontend_loc.clone());
 
+    let api_params = api::APIParams::new(db, email);
+    let api_filters = api::build_filters(api_params.clone(), frontend_loc, startup_time);
+
     info!("channel_builder version {}", helpers::VERSION);
     info!("channel_builder startup time {}", startup_time); 
 
-    let server_sockaddr: std::net::SocketAddr = server_address
-        .parse()
-        .expect("Unable to parse socket address");
-    let api_params = api::APIParams::new(db, email);
-    let api_filters = api::build_filters(api_params, frontend_loc, startup_time);
-    warp::serve(api_filters).run(server_sockaddr).await;
+    let (_addr, server_fut) = warp::serve(api_filters)
+        .bind_with_graceful_shutdown(server_sockaddr,
+            async move { sig_stream.recv().await; () }
+        );
+
+    match tokio::task::spawn(server_fut).await {
+        Ok(_) => debug!("Spawn completed"),
+        Err(err) => debug!("Spawn errored: {:?}", err),
+    };
+
+    api::orderly_shutdown(api_params).await;
 }

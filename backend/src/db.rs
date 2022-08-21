@@ -115,10 +115,16 @@ impl fmt::Display for StatusReport {
 }
 
 #[derive(Clone)]
+pub enum NameOrID {
+    Name(String),
+    ID(i32),
+}
+
+#[derive(Clone)]
 pub enum Action {
     AddUser { user: String, pass_hash: String, pass_hash_ver: i32, reg_key: String },
     ValidateAccount { val_code: String },
-    AddSessKey { user: String, sess_type: SessType, sess_key: String },
+    AddSessKey { user: NameOrID, sess_type: SessType, sess_key: String },
     ValidateSessKey { sess_type: SessType, sess_key: String },
     LogoutSessKey { sess_type: SessType, sess_key: String },
     GetUserPassHash { user: String },
@@ -129,6 +135,7 @@ pub enum Action {
     GetActiveChannel { user_id: i32 },
     SetActiveChannel { user_id: i32, list_name: String },
     GetStatusReport,
+    Shutdown,
 }
 
 #[derive(Clone,Debug)]
@@ -140,6 +147,7 @@ pub enum Response {
     ValidatedKey(bool, i32),
     UserPassHash(String, i32, bool),
     StatusReport(StatusReport),
+    Shutdown,
 }
 
 struct Message {
@@ -213,12 +221,11 @@ impl Db {
     {
         let mut s_r = StatusReport::default();
 
-        while let Some(msg) = match db_rx.recv() {
-            Ok(msg) => Some(msg),
-            Err(_err) => {
-                panic!("DB sender disconnected!");
-            }
-        } {
+        let mut keep_going = true;
+
+        while keep_going {
+            let msg = db_rx.recv().expect("DB sender disconnected!");
+
             let result = match msg.action {
                 Action::AddUser { user, pass_hash, pass_hash_ver, reg_key }=>
                     Self::add_user(&dat, &mut s_r, user, pass_hash, pass_hash_ver, reg_key),
@@ -246,6 +253,8 @@ impl Db {
                     Self::set_active_channel(&dat, &mut s_r, user_id, list_name),
                 Action::GetStatusReport =>
                     Self::get_status_report(&mut s_r),
+                Action::Shutdown =>
+                    { keep_going = false; Ok(Response::Shutdown) },
             };
 
             match msg.resp.send(result) {
@@ -255,6 +264,8 @@ impl Db {
                 },
             };
         }
+
+        info!("Database shutdown received, shutting down");
     }
 
     fn add_user(dat: &InThreadData, s_r: &mut StatusReport,
@@ -313,7 +324,7 @@ impl Db {
         Ok(Response::Bool(true))
     }
 
-    fn add_session_key(dat: &InThreadData, s_r: &mut StatusReport, user: String,
+    fn add_session_key(dat: &InThreadData, s_r: &mut StatusReport, user: NameOrID,
             sess_type: SessType, sess_key: String)
         -> Result<Response, DBError>
     {
@@ -322,12 +333,20 @@ impl Db {
         // Generate current time
         let time_now = Utc::now();
 
-        // Find the user_data that matches the username if there is one
-        let results = allow_only_one(
-            ud_dsl.filter(user_data::username.eq(user))
-            .limit(5)
-            .load::<db_models::QueryUserData>(&dat.db_conn)
-        )?;
+        // Find the user_data that matches the username or id if there is one
+        let results = match user {
+            NameOrID::Name(name) =>
+                allow_only_one(
+                    ud_dsl.filter(user_data::username.eq(name))
+                    .limit(5)
+                    .load::<db_models::QueryUserData>(&dat.db_conn)),
+            NameOrID::ID(id) =>
+                allow_only_one(
+                    ud_dsl.filter(user_data::id.eq(id))
+                    .limit(5)
+                    .load::<db_models::QueryUserData>(&dat.db_conn)),
+        }?;
+
 
         // Build the sess key entry 
         allow_only_one(

@@ -95,8 +95,10 @@ pub struct InnerStatusReport {
     authenticate_ro: u32,
     authenticate_fe: u32,
     get_status_report: u32,
-    create_account: u32,
     validate_account: u32,
+    create_account: u32,
+    refresh_session_gen: u32,
+    refresh_session_ro: u32,
     validate_session_fe: u32,
     validate_session_ro: u32,
     logout_session_fe: u32,
@@ -122,6 +124,8 @@ impl fmt::Display for InnerStatusReport {
                 "    Frontend Auths: {}\n",
                 "  Account Creations: {}\n",
                 "    Attempted: {}\n",
+                "  Refresh Session General: {}\n",
+                "    Roku: {}\n",
                 "  Validations:\n",
                 "    Account: {}\n",
                 "    Frontend: {}\n",
@@ -140,6 +144,7 @@ impl fmt::Display for InnerStatusReport {
             self.authenticate, self.auth_success,
             self.authenticate_ro, self.authenticate_fe,
             self.account_created, self.create_account,
+            self.refresh_session_gen, self.refresh_session_ro,
             self.validate_account, self.validate_session_fe,
             self.validate_session_ro, self.logout_session_fe,
             self.create_channel_list, self.set_active_channel,
@@ -160,6 +165,7 @@ pub struct APIParams {
 
 impl APIParams {
     pub fn new(db: db::Db, email: email::Email) -> Self {
+        // a_s_r = API Status Report
         let a_s_r = StatusReportWrapper::new();
         Self {
             db,
@@ -211,6 +217,7 @@ async fn authenticate_gen(sess_type: SessType, params: APIParams,
             Err(err) => Err(Rejections::from(err)),
         }?;
 
+    // TODO - am I returning something that indicates a user does/doesn't exist
     if !valid_status {
         return Err(Rejections::InvalidUserNonValidated.into());
     }
@@ -228,7 +235,7 @@ async fn authenticate_gen(sess_type: SessType, params: APIParams,
     let sess_key = gen_large_rand_str();
 
     match params.db.please(Action::AddSessKey {
-        user: form_dat.username.clone(),
+        user: db::NameOrID::Name(form_dat.username.clone()),
         sess_type: sess_type.clone(),
         sess_key: sess_key.clone(),
     }).await {
@@ -497,7 +504,7 @@ pub async fn get_channel_list(params: APIParams, sess_info: (String, i32),
     }
 }
 
-pub async fn get_channel_xml_ro(params: APIParams, sess_info: (String, i32)) 
+pub async fn get_channel_xml_ro(params: APIParams, sess_info: (String, i32))
     -> Result<impl Reply, Rejection>
 {
     trace!("Beginning get_channel_xml_ro");
@@ -524,7 +531,65 @@ pub async fn get_channel_xml_ro(params: APIParams, sess_info: (String, i32))
     Ok(warp::reply::html(xml_str1))
 }
 
-pub async fn set_channel_list(params: APIParams, sess_info: (String, i32), 
+pub async fn refresh_session_ro(params: APIParams, sess_info: (String, i32))
+    -> Result<impl Reply, Rejection>
+{
+    trace!("Beginning refresh_session_ro");
+    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        report.refresh_session_ro += 1;
+    }).await;
+
+    refresh_session_gen(SessType::Roku, params, sess_info).await
+}
+
+async fn refresh_session_gen(sess_type: SessType, params: APIParams,
+        sess_info: (String, i32)
+    )
+    -> Result<impl Reply, Rejection>
+{
+    trace!("Beginning refresh_session_gen");
+    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        report.refresh_session_gen += 1;
+    }).await;
+
+    let (old_sess_key, user_id) = sess_info;
+
+    // Generate a new session key
+    let new_sess_key = gen_large_rand_str();
+
+    // Add the new to the DB, and fail if this action fails
+    match params.db.please(Action::AddSessKey {
+        user: db::NameOrID::ID(user_id),
+        sess_type: sess_type.clone(),
+        sess_key: new_sess_key.clone(),
+    }).await {
+        Ok(Response::Empty) => Ok(()),
+        Ok(resp) => Err(Rejections::db_api_err("AddSessKey", resp)),
+        Err(err) => Err(Rejections::from(err)),
+    }?;
+
+    // Remove the old session key, but don't fail if this fails...
+    match params.db.please(Action::LogoutSessKey {
+        sess_type: sess_type.clone(),
+        sess_key: old_sess_key,
+    }).await {
+        Ok(Response::Empty) => (),
+        Ok(resp) => error!("Invalid response from DB for LogoutSessKey: {:?}", resp),
+        Err(err) => error!("Error from DB for LogoutSessKey: {:?}", err),
+    };
+
+    trace!("Refreshed session key: {}", new_sess_key.clone());
+
+    Ok(warp::reply::with_header(
+        warp::reply::html("".to_string()),
+        "Set-Cookie",
+        format!("{}={}; Max-Age={}; SameSite=Lax",
+            helpers::SESSION_COOKIE_NAME, new_sess_key,
+            sess_type.get_max_age().num_seconds())
+    ))
+}
+
+pub async fn set_channel_list(params: APIParams, sess_info: (String, i32),
     form_dat: models::SetChannelListForm)
     -> Result<impl Reply, Rejection>
 {
@@ -661,6 +726,17 @@ fn gen_large_rand_str() -> String {
     let reg_key_p1 = rand::thread_rng().gen::<u128>();
     let reg_key_p2 = rand::thread_rng().gen::<u128>();
     format!("{:032X}{:032X}", reg_key_p1, reg_key_p2)
+}
+
+pub async fn orderly_shutdown(params: APIParams) -> () {
+    info!("Beginning orderly shutdown");
+
+    params.email.please(email::Action::Shutdown).await;
+    match params.db.please(db::Action::Shutdown).await {
+        Ok(Response::Shutdown) => (),
+        Ok(resp) => error!("Wrong shutdown response from DB: {:?}", resp),
+        Err(err) => error!("Error from DB: {:?}", err),
+    };
 }
 
 #[cfg(test)]

@@ -78,6 +78,7 @@ impl fmt::Display for StatusReport {
 pub enum Action {
     SendRegAcct(RegisterData),
     GetStatusReport(oneshot::Sender<StatusReport>),
+    Shutdown,
 }
 
 impl Email {
@@ -176,6 +177,10 @@ impl Email {
                             dat.clone(), reg_dat),
                     Action::GetStatusReport(sender) =>
                         Self::action_get_status_report(&mut status_report, sender),
+                    Action::Shutdown => {
+                        info!("Email shutdown received, shutting down");
+                        return;
+                    }
                 }
             }
         }

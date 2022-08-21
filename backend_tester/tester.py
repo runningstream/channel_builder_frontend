@@ -80,11 +80,28 @@ class ChannelBuilderTester:
 
     def get_channel_xml_roku(self):
         sess_key = self.get_sess_key_ro()
-        headers = { "referer": self.get_referer(), "Cookie": sess_key, }
+        headers = { "Cookie": sess_key, }
         req = requests.get(self.get_url("get_channel_xml_ro"),
             headers = headers,
         )
         print(req.text)
+        return req.status_code == 200
+
+    def refresh_session_roku(self):
+        portion = "ro"
+        username = self.username
+
+        sess_key = self.get_sess_key_ro()
+        headers = { "Cookie": sess_key, }
+        req = requests.get(self.get_url("refresh_session_ro"),
+            headers = headers,
+        )
+        print(req.headers)
+        if req.status_code == 200:
+            set_cookie = req.headers["set-cookie"]
+            cook_end = set_cookie.find(";")
+            self.sess_keys[(username, portion)] = set_cookie[:cook_end]
+        print(self.sess_keys[(username, portion)])
         return req.status_code == 200
 
     def get_status_report(self):
@@ -111,10 +128,16 @@ if __name__ == "__main__":
         ("Authenticate Frontend", tester.authenticate_fe),
         ("Authenticate Roku", tester.authenticate_ro),
         ("Get Channel XML Roku", tester.get_channel_xml_roku),
+        ("Refresh Session Roku", tester.refresh_session_roku),
+        ("Get Channel XML Roku", tester.get_channel_xml_roku),
         ("Get Status Report", tester.get_status_report),
     ]
 
-    results = [(name, func()) for (name, func) in tests]
+    def run_test(name, func):
+        print(f"TEST: {name}")
+        return func()
+
+    results = [(name, run_test(name, func)) for (name, func) in tests]
 
     for (name, result) in results:
         print(f"{ name }: { result }")

@@ -1,13 +1,13 @@
 [package]
 name = "channel_builder"
-version = "0.1.3"
+version = "0.1.4-0.0.1"
 authors = ["Running Stream <runningstreamllc@gmail.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "^1", features = ["macros", "rt-multi-thread", "sync"] }
+tokio = { version = "^1", features = ["macros", "rt-multi-thread", "sync", "signal"] }
 warp = { version = "^0.3", default-features = false }
 serde = { version = "^1.0", features = ["derive"] }
 serde_urlencoded = "^0.7"

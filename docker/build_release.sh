@@ -7,7 +7,8 @@ read DO_PUSH
 
 if [ "$DO_PUSH" = "yes" ]; then
     echo Pushing...
-    sudo docker push runningstream/channel_builder_backend:latest
+    sudo docker push "runningstream/channel_builder_backend:$VERSION"
+    sudo docker push "runningstream/channel_builder_backend:latest"
 else
     echo Skipping push
 fi
