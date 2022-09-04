@@ -9,5 +9,8 @@ target/debug/channel_builder: ${CHANNEL_BUILDER_DEPS}
 target/release/channel_builder: ${CHANNEL_BUILDER_DEPS}
 	cargo build --release
 
+docs:
+	cargo doc --no-deps
+
 
 .PHONY: debug release

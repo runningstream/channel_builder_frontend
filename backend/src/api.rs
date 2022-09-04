@@ -1,14 +1,62 @@
+//! This module implements the API interface, and this documentation describes that interface.
+
 use crate::{api_handlers, helpers, models};
 pub use api_handlers::{APIParams, orderly_shutdown};
 use chrono::prelude::{DateTime, Utc};
 use helpers::{SessType, SESSION_COOKIE_NAME};
 use warp::{Filter, Reply, Rejection};
 
+#[macro_export]
+macro_rules! APICORS {
+    (true) => { "Requires correct origin/referer" };
+    (false) => { "Not required or supported" };
+}
+
+#[macro_export]
+macro_rules! APIDATA {
+    ( $str:literal ) => { concat!(
+        "\n\nData: ", $str, "\n\nContent-Type: x-www-form-urlencoded"
+    )};
+    () => { "" };
+}
+
+#[macro_export]
+macro_rules! APIPathV1 {
+    ( $tail:literal ) => { concat!(".../api/v1/", $tail) };
+}
+
+#[macro_export]
+macro_rules! APIMethod {
+    (POST) => { "POST" };
+    (GET) => { "GET" };
+}
+
+#[macro_export]
+macro_rules! APIDocs {
+    (
+        Desc:$desc:literal,
+        URL:$url:expr,
+        Method:$method:expr,
+        CORS:$cors:expr,
+        Data:$data:expr,
+        $($tt:tt)*
+    ) => {
+        #[doc=concat!(
+            "# ", $desc,
+            "\n\nURL endpoint: ", $url,
+            "\n\nMethod: ", $method,
+            $data,
+            "\n\nCORS: ", $cors,
+        )]
+        $($tt)*
+    };
+}
+
 // TODO is this big enough?
+#[doc(hidden)]
 const MAX_AUTH_FORM_LEN: u64 = 1024 * 256;
 
-pub const LOG_KEY: &str = "backend";
-
+/// Create the full filter string to permit Warp framework to kick-off
 pub fn build_filters(params: APIParams,
         cors_origin: String, startup_time: DateTime<Utc>
     )
@@ -18,6 +66,7 @@ pub fn build_filters(params: APIParams,
     let cors = warp::cors()
         .allow_origin(cors_origin.as_str())
         .allow_methods(vec!["GET", "POST"])
+        //.allow_headers(vec!["content-type"]) // Generally not required
         .allow_credentials(true);
 
     // Permit Roku endpoints and status to avoid origin_referer_filt
@@ -45,7 +94,7 @@ pub fn build_filters(params: APIParams,
         //.or(serve_static_files())
         .recover(api_handlers::handle_rejection)
         .with(cors)
-        .with(warp::log(LOG_KEY))
+        .with(warp::log(crate::LOG_KEY))
 }
 
 /*
@@ -63,6 +112,13 @@ fn serve_static_files()
 }
 */
 
+APIDocs!{
+    Desc: "Authenticate frontend users",
+    URL: APIPathV1!("authenticate_fe"),
+    Method: APIMethod!(POST),
+    CORS: APICORS!(true),
+    Data: APIDATA!("username and password strings"),
+
 fn api_authenticate_fe(params: APIParams)
     -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
 {
@@ -75,9 +131,12 @@ fn api_authenticate_fe(params: APIParams)
         .and_then(api_handlers::authenticate_fe)
 }
 
+}
+
 // Make sure that either the origin or referer headers are present
 // Validate that it starts with the expected cors_origin
 // This provides CSRF protection for modern browsers
+#[doc(hidden)]
 fn origin_referer_filt(cors_origin: String)
     -> impl Filter<Extract = (), Error = Rejection> + Clone
 {
@@ -89,6 +148,13 @@ fn origin_referer_filt(cors_origin: String)
         .untuple_one()
 }
 
+APIDocs!{
+    Desc: "Authenticate Roku users",
+    URL: APIPathV1!("authenticate_ro"),
+    Method: APIMethod!(POST),
+    CORS: APICORS!(false),
+    Data: APIDATA!("username and password strings"),
+
 fn api_authenticate_ro(params: APIParams)
     -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
 {
@@ -99,6 +165,7 @@ fn api_authenticate_ro(params: APIParams)
         .and(add_in(params))
         .and(get_form::<models::AuthForm>())
         .and_then(api_handlers::authenticate_ro)
+}
 }
 
 fn api_create_account(params: APIParams)
@@ -236,6 +303,7 @@ fn api_get_status_report(startup_time: DateTime<Utc>, params: APIParams)
         .and_then(api_handlers::get_status_report)
 }
 
+#[doc(hidden)]
 fn get_form<T>()
     -> impl Filter<Extract = (T,), Error = Rejection> + Clone
     where
@@ -246,6 +314,7 @@ fn get_form<T>()
         .and(warp::body::form())
 }
 
+#[doc(hidden)]
 fn validate_session(sess_type: SessType, params: APIParams)
     -> impl Filter<Extract = ((String, i32),), Error = Rejection> + Clone
 {
@@ -257,6 +326,7 @@ fn validate_session(sess_type: SessType, params: APIParams)
         )
 }
 
+#[doc(hidden)]
 fn api_v1_path(api_tail: &str)
     -> impl Filter<Extract = (), Error = Rejection> + Clone + '_
 {
@@ -266,6 +336,7 @@ fn api_v1_path(api_tail: &str)
         .and(warp::path::end())
 }
 
+#[doc(hidden)]
 fn add_in<THING>(thing: THING)
     -> impl Filter<Extract = (THING,), Error = std::convert::Infallible>
         + Clone

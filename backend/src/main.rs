@@ -1,3 +1,6 @@
+//! The Channel Builder API daemon handles interactions with frontend Javascript, and interfaces with the database and email servers.
+//! The API is documented in the [api] module.
+
 #[macro_use] extern crate diesel;
 #[macro_use] extern crate diesel_migrations;
 #[macro_use] extern crate log;
@@ -14,6 +17,8 @@ pub mod api;
 pub mod models;
 pub mod api_handlers;
 pub mod password_hash_version;
+
+pub const LOG_KEY: &str = "backend";
 
 /// Returns the environment variable specified, or reads the value
 /// out of the file specified in an environment variable, or returns
@@ -61,7 +66,7 @@ async fn main() {
     };
 
     if std::env::var_os("RUST_LOG").is_none() {
-        std::env::set_var("RUST_LOG", format!("{}=info", api::LOG_KEY));
+        std::env::set_var("RUST_LOG", format!("{}=info", LOG_KEY));
     }
     pretty_env_logger::init();
 
