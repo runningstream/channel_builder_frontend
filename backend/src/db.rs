@@ -13,11 +13,12 @@ use tokio::sync::oneshot;
 use chrono::Utc;
 use thiserror::Error;
 use crate::diesel::{QueryDsl, ExpressionMethods};
-use crate::schema::{user_data, channel_list, front_end_sess_keys, roku_sess_keys};
+use crate::schema::{user_data, channel_list, front_end_sess_keys, roku_sess_keys, display_sess_keys};
 use crate::schema::user_data::dsl::user_data as ud_dsl;
 use crate::schema::channel_list::dsl::channel_list as cl_dsl;
 use crate::schema::front_end_sess_keys::dsl::front_end_sess_keys as fesk_dsl;
 use crate::schema::roku_sess_keys::dsl::roku_sess_keys as rosk_dsl;
+use crate::schema::display_sess_keys::dsl::display_sess_keys as disk_dsl;
 
 embed_migrations!();
 
@@ -373,6 +374,17 @@ impl Db {
                         .values(&new_sess)
                         .execute(&dat.db_conn)
                 },
+                SessType::Display => {
+                    let new_sess = db_models::InsertDISessKey {
+                        userid: results[0].id,
+                        sesskey: &sess_key,
+                        creationtime: time_now,
+                        lastusedtime: time_now,
+                    };
+                    diesel::insert_into(display_sess_keys::table)
+                        .values(&new_sess)
+                        .execute(&dat.db_conn)
+                },
             }
         )?;
 
@@ -411,6 +423,12 @@ impl Db {
                         .limit(5)
                         .load::<db_models::QueryROSessKey>(&dat.db_conn)
                 ),
+            SessType::Display =>
+                process_filt_result(
+                    disk_dsl.filter(display_sess_keys::sesskey.eq(sess_key))
+                        .limit(5)
+                        .load::<db_models::QueryDISessKey>(&dat.db_conn)
+                ),
         }?;
 
         // Validate that session key hasn't expired
@@ -427,6 +445,9 @@ impl Db {
                         .execute(&dat.db_conn),
                 SessType::Roku => 
                     diesel::delete(rosk_dsl.find(result.id))
+                        .execute(&dat.db_conn),
+                SessType::Display => 
+                    diesel::delete(disk_dsl.find(result.id))
                         .execute(&dat.db_conn),
             };
 
@@ -445,6 +466,10 @@ impl Db {
                 SessType::Roku =>
                     diesel::update(rosk_dsl.find(result.id))
                         .set((roku_sess_keys::lastusedtime.eq(time_now),))
+                        .execute(&dat.db_conn),
+                SessType::Display =>
+                    diesel::update(disk_dsl.find(result.id))
+                        .set((display_sess_keys::lastusedtime.eq(time_now),))
                         .execute(&dat.db_conn),
             }
         )?;
@@ -468,6 +493,10 @@ impl Db {
             SessType::Roku => 
                 diesel::delete(rosk_dsl.filter(
                         roku_sess_keys::sesskey.eq(sess_key)
+                )).execute(&dat.db_conn),
+            SessType::Display => 
+                diesel::delete(disk_dsl.filter(
+                        display_sess_keys::sesskey.eq(sess_key)
                 )).execute(&dat.db_conn),
         }?;
 
@@ -587,7 +616,7 @@ impl Db {
     {
         s_r.get_active_channel += 1;
 
-        joinable!(user_data -> channel_list (active_channel) );
+        joinable!(user_data -> channel_list (active_channel));
 
         let results = allow_only_one(
             channel_list::table

@@ -18,13 +18,15 @@ pub mod models;
 pub mod api_handlers;
 pub mod password_hash_version;
 
+/// The key associated with all log entries - currently "backend"
 pub const LOG_KEY: &str = "backend";
 
-/// Returns the environment variable specified, or reads the value
-/// out of the file specified in an environment variable, or returns
-/// the default_val if that isn't None.
-///
-/// Panics if it cannot return a value.
+// Returns the environment variable specified, or reads the value
+// out of the file specified in an environment variable, or returns
+// the default_val if that isn't None.
+//
+// Panics if it cannot return a value.
+#[doc(hidden)]
 fn get_env_param(param_name: &str, default_val: Option<&str>) -> String {
     let param_file_name = format!("{}_FILE", param_name.clone());
 

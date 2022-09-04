@@ -17,13 +17,14 @@ pub static VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// An enum that differentiates frontend session types
 #[derive(Debug, Clone)]
-pub enum SessType { Frontend, Roku }
+pub enum SessType { Frontend, Roku, Display }
 
 impl SessType {
     pub fn get_max_age(&self) -> chrono::Duration {
         match *self {
             SessType::Frontend => chrono::Duration::days(5),
             SessType::Roku => chrono::Duration::days(365),
+            SessType::Display => chrono::Duration::days(365),
         }
     }
 }

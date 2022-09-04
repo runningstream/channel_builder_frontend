@@ -1,6 +1,6 @@
 /// The models employed by Diesel and the db module
 
-use crate::schema::{user_data, front_end_sess_keys, channel_list, roku_sess_keys};
+use crate::schema::{user_data, front_end_sess_keys, channel_list, roku_sess_keys, display_sess_keys};
 use chrono::{DateTime, Utc};
 
 /// The components in common for all session keys (roku and frontend, now)
@@ -88,6 +88,35 @@ impl SessKeyCommon for QueryROSessKey {
 #[derive(Insertable)]
 #[table_name="roku_sess_keys"]
 pub struct InsertROSessKey<'a> {
+    pub userid: i32,
+    pub sesskey: &'a str,
+    pub creationtime: DateTime<Utc>,
+    pub lastusedtime: DateTime<Utc>,
+}
+
+#[derive(Queryable)]
+pub struct QueryDISessKey {
+    pub id: i32,
+    pub userid: i32,
+    pub sesskey: String,
+    pub creationtime: DateTime<Utc>,
+    pub lastusedtime: DateTime<Utc>,
+}
+
+/// Implements the common session key interface for display session keys
+impl SessKeyCommon for QueryDISessKey {
+    fn get_common(&self) -> SessKeyComponents {
+        SessKeyComponents {
+            id: self.id,
+            userid: self.userid,
+            creationtime: self.creationtime,
+        }
+    }
+}
+
+#[derive(Insertable)]
+#[table_name="display_sess_keys"]
+pub struct InsertDISessKey<'a> {
     pub userid: i32,
     pub sesskey: &'a str,
     pub creationtime: DateTime<Utc>,

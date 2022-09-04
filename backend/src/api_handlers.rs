@@ -17,6 +17,7 @@ pub enum Rejections {
     InvalidUserLookup, InvalidUserNonValidated,
     InvalidPassword, InvalidSession, InvalidEmailAddr,
     InvalidValidationCode, InvalidOriginOrReferer,
+    InvalidRefreshSessionType,
     // System Problems
     ErrorInternal(String), ErrorFromPWHash(PWHashError),
 
@@ -79,7 +80,7 @@ impl StatusReportWrapper {
         }
     }
 
-    pub async fn mod_report(&self, mod_func: fn(&mut InnerStatusReport) -> ()) -> () {
+    pub async fn mod_report(&self, mod_func: impl Fn(&mut InnerStatusReport) -> ()) -> () {
         mod_func(&mut *self.inner_report.lock().await)
     }
 
@@ -94,20 +95,31 @@ pub struct InnerStatusReport {
     authenticate: u32,
     authenticate_ro: u32,
     authenticate_fe: u32,
+    authenticate_di: u32,
     get_status_report: u32,
     validate_account: u32,
     create_account: u32,
-    refresh_session_gen: u32,
+    refresh_session: u32,
     refresh_session_ro: u32,
+    refresh_session_di: u32,
+    validate_session: u32,
     validate_session_fe: u32,
     validate_session_ro: u32,
+    validate_session_di: u32,
+    logout_session: u32,
     logout_session_fe: u32,
+    logout_session_ro: u32,
+    logout_session_di: u32,
     get_channel_lists: u32,
     get_channel_list: u32,
     get_channel_xml_ro: u32,
     set_channel_list: u32,
     create_channel_list: u32,
     set_active_channel: u32,
+    get_active_channel: u32,
+    get_active_channel_fe: u32,
+    get_active_channel_ro: u32,
+    get_active_channel_di: u32,
 
     // Other status
     auth_success: u32,
@@ -120,18 +132,24 @@ impl fmt::Display for InnerStatusReport {
                 "API Handler Status Report:\n",
                 "  Authentications: {}\n",
                 "    Successful: {}\n",
-                "    Roku Auths: {}\n",
                 "    Frontend Auths: {}\n",
+                "    Roku Auths: {}\n",
+                "    Display Auths: {}\n",
                 "  Account Creations: {}\n",
                 "    Attempted: {}\n",
-                "  Refresh Session General: {}\n",
+                "  Refresh Session: {}\n",
                 "    Roku: {}\n",
+                "    Display: {}\n",
                 "  Validations:\n",
                 "    Account: {}\n",
+                "    Session: {}\n",
+                "      Frontend: {}\n",
+                "      Roku: {}\n",
+                "      Display: {}\n",
+                "  Logouts: {}\n",
                 "    Frontend: {}\n",
                 "    Roku: {}\n",
-                "  Logouts:\n",
-                "    Frontend: {}\n",
+                "    Display: {}\n",
                 "  Channel Stuff:\n",
                 "    Create: {}\n",
                 "    Set Active: {}\n",
@@ -139,17 +157,28 @@ impl fmt::Display for InnerStatusReport {
                 "    Get Content: {}\n",
                 "    Get XML Content Roku: {}\n",
                 "    Get Channel Lists: {}\n",
+                "    Get Active: {}\n",
+                "      Frontend: {}\n",
+                "      Roku: {}\n",
+                "      Display: {}\n",
                 "  Status Reports: {}\n"
                 ),
             self.authenticate, self.auth_success,
-            self.authenticate_ro, self.authenticate_fe,
+            self.authenticate_fe, self.authenticate_ro,
+            self.authenticate_di,
             self.account_created, self.create_account,
-            self.refresh_session_gen, self.refresh_session_ro,
-            self.validate_account, self.validate_session_fe,
-            self.validate_session_ro, self.logout_session_fe,
+            self.refresh_session, self.refresh_session_ro,
+            self.refresh_session_di,
+            self.validate_account, self.validate_session,
+            self.validate_session_fe, self.validate_session_ro,
+            self.validate_session_di, self.logout_session,
+            self.logout_session_fe, self.logout_session_ro,
+            self.logout_session_di,
             self.create_channel_list, self.set_active_channel,
             self.set_channel_list, self.get_channel_list,
             self.get_channel_xml_ro, self.get_channel_lists,
+            self.get_active_channel, self.get_active_channel_fe,
+            self.get_active_channel_ro, self.get_active_channel_di,
             self.get_status_report
         )
     }
@@ -175,35 +204,18 @@ impl APIParams {
     }
 }
 
-pub async fn authenticate_ro(params: APIParams, form_dat: models::AuthForm)
-    -> Result<impl Reply, Rejection>
-{
-    trace!("Starting authenticate_ro");
-    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
-        report.authenticate_ro += 1;
-    }).await;
-
-    authenticate_gen(SessType::Roku, params, form_dat).await
-}
-
-pub async fn authenticate_fe(params: APIParams, form_dat: models::AuthForm)
-    -> Result<impl Reply, Rejection>
-{
-    trace!("Starting authenticate_fe");
-    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
-        report.authenticate_fe += 1;
-    }).await;
-
-    authenticate_gen(SessType::Frontend, params, form_dat).await
-}
-
-async fn authenticate_gen(sess_type: SessType, params: APIParams,
+pub async fn authenticate(sess_type: SessType, params: APIParams,
         form_dat: models::AuthForm
     )
     -> Result<impl Reply, Rejection>
 {
-    trace!("Starting authenticate_gen");
+    trace!("Beginning authenticate {:?}", sess_type);
     params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        match sess_type {
+            SessType::Frontend => { report.authenticate_fe += 1; },
+            SessType::Roku => { report.authenticate_ro += 1; },
+            SessType::Display => { report.authenticate_di += 1; },
+        }
         report.authenticate += 1;
     }).await;
 
@@ -396,32 +408,20 @@ pub async fn validate_account(params: APIParams, opts: models::ValidateAccountRe
     
 }
 
-pub async fn validate_session_fe(params: APIParams, sess_info: (String, i32))
+pub async fn validate_session(sess_type: SessType, params: APIParams,
+        _sess_info: (String, i32))
     -> Result<impl Reply, Rejection>
 {
-    trace!("Starting validate_session_fe");
+    trace!("Beginning validate_session {:?}", sess_type);
     params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
-        report.validate_session_fe += 1;
+        match sess_type {
+            SessType::Frontend => { report.validate_session_fe += 1; },
+            SessType::Roku => { report.validate_session_ro += 1; },
+            SessType::Display => { report.validate_session_di += 1; },
+        }
+        report.validate_session += 1;
     }).await;
 
-    validate_session(SessType::Frontend, params, sess_info).await
-}
-
-pub async fn validate_session_ro(params: APIParams, sess_info: (String, i32))
-    -> Result<impl Reply, Rejection>
-{
-    trace!("Starting validate_session_ro");
-    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
-        report.validate_session_ro += 1;
-    }).await;
-
-    validate_session(SessType::Roku, params, sess_info).await
-}
-
-async fn validate_session(_sess_type: SessType, _params: APIParams,
-    _sess_info: (String, i32))
-    -> Result<impl Reply, Rejection>
-{
     // If we can get to here, we're ok
     Ok(StatusCode::OK)
 }
@@ -444,18 +444,24 @@ pub async fn retrieve_session_dat(session_id: String, params: APIParams, sess_ty
     }
 }
 
-pub async fn logout_session_fe(params: APIParams, sess_info: (String, i32))
+pub async fn logout_session(sess_type: SessType, params: APIParams,
+        sess_info: (String, i32))
     -> Result<impl Reply, Rejection>
 {
-    trace!("Beginning logout_session_fe");
+    trace!("Beginning logout_session {:?}", sess_type);
     params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
-        report.logout_session_fe += 1;
+        match sess_type {
+            SessType::Frontend => { report.logout_session_fe += 1; },
+            SessType::Roku => { report.logout_session_ro += 1; },
+            SessType::Display => { report.logout_session_di += 1; },
+        }
+        report.logout_session += 1;
     }).await;
 
     let (sess_key, _user_id) = sess_info;
 
     match params.db.please(Action::LogoutSessKey {
-        sess_type: SessType::Frontend,
+        sess_type: sess_type,
         sess_key: sess_key,
     }).await {
         Ok(Response::Empty) => Ok(StatusCode::OK),
@@ -483,11 +489,11 @@ pub async fn get_channel_lists(params: APIParams, sess_info: (String, i32))
     }
 }
 
-pub async fn get_channel_list(params: APIParams, sess_info: (String, i32), 
-    opts: models::GetChannelListQuery)
+pub async fn get_channel_list(sess_type: SessType, params: APIParams,
+        sess_info: (String, i32), opts: models::GetChannelListQuery)
     -> Result<impl Reply, Rejection>
 {
-    trace!("Beginning get_channel_list");
+    trace!("Beginning get_channel_list {:?}", sess_type);
     params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
         report.get_channel_list += 1;
     }).await;
@@ -504,10 +510,36 @@ pub async fn get_channel_list(params: APIParams, sess_info: (String, i32),
     }
 }
 
-pub async fn get_channel_xml_ro(params: APIParams, sess_info: (String, i32))
+pub async fn get_active_channel(sess_type: SessType, params: APIParams,
+        sess_info: (String, i32))
     -> Result<impl Reply, Rejection>
 {
-    trace!("Beginning get_channel_xml_ro");
+    trace!("Beginning get_active_channel {:?}", sess_type);
+    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        match sess_type {
+            SessType::Frontend => { report.get_active_channel_fe += 1; },
+            SessType::Roku => { report.get_active_channel_ro += 1; },
+            SessType::Display => { report.get_active_channel_di += 1; },
+        }
+        report.get_active_channel += 1;
+    }).await;
+
+    let (_sess_key, user_id) = sess_info;
+
+    match params.db.please(Action::GetActiveChannel {
+        user_id: user_id,
+    }).await {
+        Ok(Response::StringResp(val)) => Ok(warp::reply::html(val)),
+        Ok(resp) => Err(Rejections::db_api_err("GetActiveChannel", resp).into()),
+        Err(err) => Err(Rejections::from(err).into()),
+    }
+}
+
+pub async fn get_channel_xml(sess_type: SessType, params: APIParams,
+        sess_info: (String, i32))
+    -> Result<impl Reply, Rejection>
+{
+    trace!("Beginning get_channel_xml {:?}", sess_type);
     params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
         report.get_channel_xml_ro += 1;
     }).await;
@@ -531,25 +563,27 @@ pub async fn get_channel_xml_ro(params: APIParams, sess_info: (String, i32))
     Ok(warp::reply::html(xml_str1))
 }
 
-pub async fn refresh_session_ro(params: APIParams, sess_info: (String, i32))
-    -> Result<impl Reply, Rejection>
-{
-    trace!("Beginning refresh_session_ro");
-    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
-        report.refresh_session_ro += 1;
-    }).await;
-
-    refresh_session_gen(SessType::Roku, params, sess_info).await
-}
-
-async fn refresh_session_gen(sess_type: SessType, params: APIParams,
+pub async fn refresh_session(sess_type: SessType, params: APIParams,
         sess_info: (String, i32)
     )
     -> Result<impl Reply, Rejection>
 {
-    trace!("Beginning refresh_session_gen");
+    trace!("Beginning refresh_session {:?}", sess_type);
+
+    // Error out if they're trying to refresh a session that shouldn't be
+    match sess_type {
+        SessType::Roku => Ok(()),
+        SessType::Display => Ok(()),
+        _ => Err(Rejections::InvalidRefreshSessionType),
+    }?;
+
     params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
-        report.refresh_session_gen += 1;
+        match sess_type {
+            SessType::Roku => { report.refresh_session_ro += 1; },
+            SessType::Display => { report.refresh_session_di += 1; },
+            _ => { panic!("Invalid session refresh attempt got too far: {:?}", sess_type) },
+        }
+        report.refresh_session += 1;
     }).await;
 
     let (old_sess_key, user_id) = sess_info;
