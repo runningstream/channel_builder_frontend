@@ -39,6 +39,7 @@ services:
             POSTGRES_HOST: "db:5432"
             CB_LISTEN: "0.0.0.0:3031"
             FRONTEND_LOC: "https://runningstream.cc"
+            HTML_PLAYER_LOC: "https://player.runningstream.cc"
             SMTP_SERVER_FILE: /run/secrets/smtp_server
             SMTP_PORT_FILE: /run/secrets/smtp_port
             SMTP_USERNAME_FILE: /run/secrets/smtp_username

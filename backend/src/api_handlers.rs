@@ -690,12 +690,12 @@ pub async fn set_active_channel(params: APIParams, sess_info: (String, i32),
     }
 }
 
-pub async fn validate_origin_or_referer(source: String, cors_origin: String)
+pub async fn validate_origin_or_referer(source: String, cors_origins: Vec<String>)
     -> Result<(), Rejection>
 {
     trace!("Beginning validate_origin_or_referer");
 
-    if source.starts_with(&cors_origin) {
+    if cors_origins.iter().any(|origin| source.starts_with(origin)) {
         Ok(())
     } else {
         Err(reject::custom(Rejections::InvalidOriginOrReferer))

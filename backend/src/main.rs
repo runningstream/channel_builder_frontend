@@ -53,8 +53,8 @@ async fn main() {
     let db_password = get_env_param("POSTGRES_PASSWORD", None);
     let db_host = get_env_param("POSTGRES_HOST", Some("localhost:5432"));
     let server_address = get_env_param("CB_LISTEN", Some("127.0.0.1:3031"));
-    let frontend_loc = get_env_param("FRONTEND_LOC",
-        Some("http://localhost:8080"));
+    let frontend_loc = get_env_param("FRONTEND_LOC", Some("http://localhost:8080"));
+    let html_player_loc = get_env_param("HTML_PLAYER_LOC", Some("http://localhost:5173"));
     let smtp_server = get_env_param("SMTP_SERVER", Some("localhost"));
     let smtp_port_str = get_env_param("SMTP_PORT", Some("25"));
     let smtp_username = get_env_param("SMTP_USERNAME", Some("webmaster"));
@@ -90,7 +90,8 @@ async fn main() {
         smtp_password, email_from, frontend_loc.clone());
 
     let api_params = api::APIParams::new(db, email);
-    let api_filters = api::build_filters(api_params.clone(), frontend_loc, startup_time);
+    let cors_origins = vec![frontend_loc, html_player_loc];
+    let api_filters = api::build_filters(api_params.clone(), cors_origins, startup_time);
 
     info!("channel_builder version {}", helpers::VERSION);
     info!("channel_builder startup time {}", startup_time); 

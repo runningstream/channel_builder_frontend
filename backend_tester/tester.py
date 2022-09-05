@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import requests
+import json
 import logging
 
 class ChannelBuilderTester:
@@ -43,6 +44,9 @@ class ChannelBuilderTester:
     def authenticate_ro(self, username = None, password = None):
         return self.authenticate("ro", username, password)
 
+    def authenticate_di(self, username = None, password = None):
+        return self.authenticate("di", username, password)
+
     def authenticate(self, portion, username = None, password = None):
         if username is None:
             username = self.username
@@ -68,6 +72,9 @@ class ChannelBuilderTester:
     def get_sess_key_ro(self, username = None, password = None):
         return self.get_sess_key("ro", username, password)
 
+    def get_sess_key_di(self, username = None, password = None):
+        return self.get_sess_key("di", username, password)
+
     def get_sess_key(self, portion, username = None, password = None):
         if username is None:
             username = self.username
@@ -78,7 +85,7 @@ class ChannelBuilderTester:
                 return ""
         return self.sess_keys[(username, portion)]
 
-    def get_channel_xml_roku(self):
+    def get_channel_xml_ro(self):
         sess_key = self.get_sess_key_ro()
         headers = { "Cookie": sess_key, }
         req = requests.get(self.get_url("get_channel_xml_ro"),
@@ -87,7 +94,31 @@ class ChannelBuilderTester:
         print(req.text)
         return req.status_code == 200
 
-    def refresh_session_roku(self):
+    def get_channel_list_di(self):
+        sess_key = self.get_sess_key_di()
+        headers = {
+            "Cookie": sess_key,
+            "referer": self.get_referer(),
+        }
+        req = requests.get(self.get_url("get_channel_list_di?list_name=First Channel"),
+            headers = headers,
+        )
+        print(req.text)
+        return req.status_code == 200
+
+    def get_active_channel_di(self):
+        sess_key = self.get_sess_key_di()
+        headers = {
+            "Cookie": sess_key,
+            "referer": self.get_referer(),
+        }
+        req = requests.get(self.get_url("get_active_channel_di"),
+            headers = headers,
+        )
+        print(req.text)
+        return req.status_code == 200
+
+    def refresh_session_ro(self):
         portion = "ro"
         username = self.username
 
@@ -105,39 +136,92 @@ class ChannelBuilderTester:
         return req.status_code == 200
 
     def get_status_report(self):
-        sess_key = self.get_sess_key_fe()
-        headers = { "referer": self.get_referer(), "Cookie": sess_key, }
+        #sess_key = self.get_sess_key_fe()
+        headers = { "referer": self.get_referer(), } # "Cookie": sess_key, }
         req = requests.get(self.get_url("status_report"),
             headers = headers,
         )
         print(req.text)
         return req.status_code == 200
         
-        
+    def set_channel_list_fe(self, name=None, data=None):
+        sess_key = self.get_sess_key_fe()
+        data = {
+            "listname": name if name is not None else "First Channel",
+            "listdata": data if data is not None else json.dumps({
+                "entries": [
+                    {"name": "First", "image": "", "videourl": "https://archive.org/download/popeye-pubdomain/A_Date_to_Skate.mp4", "videotype": "mp4", "loop": False, "type": "video"},
+                    {"name": "Second", "image": "", "videourl": "https://archive.org/download/popeye-pubdomain/A_Haul_in_One.mp4", "videotype": "mp4", "loop": False, "type": "video"},
+                ],
+            }),
+        }
+        headers = { "referer": self.get_referer(), "Cookie": sess_key, }
+        req = requests.post(self.get_url("set_channel_list_fe"),
+            headers = headers,
+            data = data,
+        )
+        print(req.text)
+        return req.status_code == 200
+
+    def create_channel_list_fe(self, name):
+        sess_key = self.get_sess_key_fe()
+        data = {
+            "listname": name,
+        }
+        headers = { "referer": self.get_referer(), "Cookie": sess_key, }
+        req = requests.post(self.get_url("create_channel_list_fe"),
+            headers = headers,
+            data = data,
+        )
+        print(req.text)
+        return req.status_code == 200
+
+    def set_active_channel_fe(self, name):
+        sess_key = self.get_sess_key_fe()
+        data = {
+            "listname": name,
+        }
+        headers = { "referer": self.get_referer(), "Cookie": sess_key, }
+        req = requests.post(self.get_url("set_active_channel_fe"),
+            headers = headers,
+            data = data,
+        )
+        print(req.text)
+        return req.status_code == 200
+
 
 if __name__ == "__main__":
     host = "192.168.86.11"
     api_port = "3031"
-    frontend_port = "8080"
+    frontend_port = "5173"
     username = "runningstreamllc+test10@gmail.com"
     password = "12345"
+
+    cust_chan_content = open("test_channel.txt", "r").read()
 
     tester = ChannelBuilderTester(host, api_port, frontend_port, username, password)
     tests = [
         ("Create Account", tester.create_fresh_account),
         ("Authenticate Frontend", tester.authenticate_fe),
         ("Authenticate Roku", tester.authenticate_ro),
-        ("Get Channel XML Roku", tester.get_channel_xml_roku),
-        ("Refresh Session Roku", tester.refresh_session_roku),
-        ("Get Channel XML Roku", tester.get_channel_xml_roku),
+        ("Authenticate Display", tester.authenticate_di),
+        ("Get Channel XML Roku", tester.get_channel_xml_ro),
+        ("Refresh Session Roku", tester.refresh_session_ro),
+        ("Set Channel List", tester.set_channel_list_fe),
+        ("Get Channel List Display", tester.get_channel_list_di),
+        ("Get Active Channel Display", tester.get_active_channel_di),
+        ("Get Channel XML Roku", tester.get_channel_xml_ro),
+        ("Create New Channel List", tester.create_channel_list_fe, "Custom List"),
+        ("Set New Channel List", tester.set_channel_list_fe, "Custom List", cust_chan_content),
+        ("Set Active Channel", tester.set_active_channel_fe, "Custom List"),
         ("Get Status Report", tester.get_status_report),
     ]
 
-    def run_test(name, func):
+    def run_test(name, func, *args):
         print(f"TEST: {name}")
-        return func()
+        return func(*args)
 
-    results = [(name, run_test(name, func)) for (name, func) in tests]
+    results = [(name, run_test(name, func, *args)) for (name, func, *args) in tests]
 
     for (name, result) in results:
         print(f"{ name }: { result }")

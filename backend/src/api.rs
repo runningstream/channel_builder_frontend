@@ -72,12 +72,12 @@ macro_rules! APIDocs {
 const MAX_AUTH_FORM_LEN: u64 = 1024 * 256;
 
 /// Not part of the public API - creates the full filter string to permit Warp framework to kick-off
-pub fn build_filters(params: APIParams, cors_origin: String, startup_time: DateTime<Utc>)
+pub fn build_filters(params: APIParams, cors_origins: Vec<String>, startup_time: DateTime<Utc>)
     -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
 {
     // Setup warp's built in CORS
     let cors = warp::cors()
-        .allow_origin(cors_origin.as_str())
+        .allow_origins(cors_origins.iter().map(|s| s.as_ref()))
         .allow_methods(vec!["GET", "POST"])
         //.allow_headers(vec!["content-type"]) // Generally not required
         .allow_credentials(true);
@@ -92,7 +92,7 @@ pub fn build_filters(params: APIParams, cors_origin: String, startup_time: DateT
         .or(api_get_channel_xml_ro(params.clone()))
         .or(api_refresh_session_ro(params.clone()))
         .or(
-            origin_referer_filt(cors_origin.clone()).and(
+            origin_referer_filt(cors_origins.clone()).and(
                 api_create_account(params.clone())
                     .or(api_validate_account(params.clone()))
                     .or(api_authenticate_fe(params.clone()))
@@ -659,13 +659,13 @@ where
 // Validate that it starts with the expected cors_origin
 // This provides CSRF protection for modern browsers
 #[doc(hidden)]
-fn origin_referer_filt(cors_origin: String)
+fn origin_referer_filt(cors_origins: Vec<String>)
     -> impl Filter<Extract = (), Error = Rejection> + Clone
 {
     warp::header("origin")
         .or(warp::header("referer"))
         .unify()
-        .and(add_in(cors_origin))
+        .and(add_in(cors_origins))
         .and_then(api_handlers::validate_origin_or_referer)
         .untuple_one()
 }
