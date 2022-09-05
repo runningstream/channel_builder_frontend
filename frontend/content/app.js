@@ -416,7 +416,7 @@ function ChannelListList(channel_list_edit_area) {
 
 ChannelListList.prototype.get_channel_lists_from_server = function () {
     let channellistlist = this;
-    make_api_request("get_channel_lists", {"method": "GET"},
+    make_api_request("get_channel_lists_fe", {"method": "GET"},
         false,
         function(data_str) {
             channellistlist.channel_list_list = JSON.parse(data_str);
@@ -459,7 +459,7 @@ ChannelListList.prototype.draw_channel_list_list = function () {
             let data = {
                 "listname": listname,
             };
-            make_api_request("create_channel_list",
+            make_api_request("create_channel_list_fe",
                 {"method": "POST", "data": data}, 
                 true,
                 function() {
@@ -486,7 +486,7 @@ ChannelListList.prototype.draw_channel_list_list = function () {
             let data = {
                 "listname": channel_list_list.currently_selected.channel_name,
             };
-            make_api_request("set_active_channel",
+            make_api_request("set_active_channel_fe",
                 {"method": "POST", "data": data},
                 true,
                 function() {
@@ -542,7 +542,7 @@ ChannelList.prototype.draw = function (draw_area) {
 ChannelList.prototype.get_channel_list_from_server = function () {
     let channellist = this;
     make_api_request(
-        "get_channel_list?list_name="+this.channel_name,
+        "get_channel_list_fe?list_name="+this.channel_name,
         {"method": "GET"}, false,
         function(data_str) {
             channellist.channel_list = JSON.parse(data_str);
@@ -577,7 +577,7 @@ ChannelList.prototype.put_channel_list_to_server = function() {
         "listname": this.channel_name,
         "listdata": JSON.stringify(strip_ui_specific(this.channel_list)),
     };
-    make_api_request("set_channel_list", {"method": "POST", "data": list_dat},
+    make_api_request("set_channel_list_fe", {"method": "POST", "data": list_dat},
         false,
         function(data_str) {
             debug_log("Successful update");
