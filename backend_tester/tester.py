@@ -197,7 +197,7 @@ if __name__ == "__main__":
     username = "runningstreamllc+test10@gmail.com"
     password = "12345"
 
-    cust_chan_content = open("test_channel.txt", "r").read()
+    cust_chan_content = open("test_channel_nice.txt", "r").read()
 
     tester = ChannelBuilderTester(host, api_port, frontend_port, username, password)
     tests = [
@@ -214,6 +214,7 @@ if __name__ == "__main__":
         ("Create New Channel List", tester.create_channel_list_fe, "Custom List"),
         ("Set New Channel List", tester.set_channel_list_fe, "Custom List", cust_chan_content),
         ("Set Active Channel", tester.set_active_channel_fe, "Custom List"),
+        ("Get Channel XML Roku", tester.get_channel_xml_ro),
         ("Get Status Report", tester.get_status_report),
     ]
 

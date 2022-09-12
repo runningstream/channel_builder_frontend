@@ -597,7 +597,7 @@ let sublist_dialog_content = function(cur_entry=undefined) {
     }
     return $( '<div class="block_labels">' +
         '<label>Name: <input type="text" id="pop_addname" value="' + cur_entry.name + '"></label>' +
-        '<label>Image URL: <input type="text" id="pop_imageurl" value="' + cur_entry.image + '"></label>' +
+        '<label>Image URL: <input type="text" id="pop_imageurl" value="' + decodeURI(cur_entry.image) + '"></label>' +
         '</div>' );
 }
 
@@ -609,8 +609,8 @@ let media_dialog_content = function(cur_entry=undefined) {
     let loop_checked = cur_entry.loop ? " checked" : "";
     let content = $('<div class="block_labels">' +
         '<label>Name: <input type="text" id="pop_addname" value="' + cur_entry.name + '"></label>' +
-        '<label>Image URL: <input type="text" id="pop_imageurl" value="' + cur_entry.image + '"></label>' +
-        '<label>Media URL: <input type="text" id="pop_videourl" value="' + cur_entry.videourl + '"></label>' +
+        '<label>Image URL: <input type="text" id="pop_imageurl" value="' + decodeURI(cur_entry.image) + '"></label>' +
+        '<label>Media URL: <input type="text" id="pop_videourl" value="' + decodeURI(cur_entry.videourl) + '"></label>' +
         '<label>Loop Media: <input type="checkbox" id="pop_loopmedia"' + loop_checked + '></label>' +
         '<label>MP4 <input type="radio" value="mp4" name="pop_videnctype"></label>' +
         '<label>Audio <input type="radio" value="audio" name="pop_videnctype"></label>' +
@@ -665,7 +665,7 @@ ChannelList.prototype.draw_channel_list = function() {
                         .click(function() {
                             let new_entry = {
                                 "name": $( "#pop_addname" ).val(),
-                                "image": $( "#pop_imageurl" ).val(),
+                                "image": encodeURI($( "#pop_imageurl" ).val()),
                                 "type": "sublist",
                                 "entries": [],
                             }
@@ -694,8 +694,8 @@ ChannelList.prototype.draw_channel_list = function() {
                         .click(function() {
                             let new_entry = {
                                 "name": $( "#pop_addname" ).val(),
-                                "image": $( "#pop_imageurl" ).val(),
-                                "videourl": $( "#pop_videourl" ).val(),
+                                "image": encodeURI($( "#pop_imageurl" ).val()),
+                                "videourl": encodeURI($( "#pop_videourl" ).val()),
                                 "videotype": $( 'input[name="pop_videnctype"]:checked' ).val(),
                                 "loop": $( "#pop_loopmedia" ).prop("checked"),
                                 "type": "video",
@@ -726,7 +726,7 @@ ChannelList.prototype.draw_channel_list = function() {
                     let mod_entry_btn = $( '<input type="button" value="Modify Entry">' )
                         .click(function() {
                             entry.name = $( "#pop_addname" ).val();
-                            entry.image = $( "#pop_imageurl" ).val();
+                            entry.image = encodeURI($( "#pop_imageurl" ).val());
 
                             // use the api call to store the new version of the list
                             channellist.put_channel_list_to_server();
@@ -801,8 +801,8 @@ ChannelList.prototype.draw_channel_list = function() {
                     let mod_entry_btn = $( '<input type="button" value="Modify Entry">' )
                         .click(function() {
                             entry.name = $( "#pop_addname" ).val();
-                            entry.image = $( "#pop_imageurl" ).val();
-                            entry.videourl = $( "#pop_videourl" ).val();
+                            entry.image = encodeURI($( "#pop_imageurl" ).val());
+                            entry.videourl = encodeURI($( "#pop_videourl" ).val());
                             entry.videotype = $( 'input[name="pop_videnctype"]:checked' ).val();
                             entry.loop = $( "#pop_loopmedia" ).prop("checked");
 
