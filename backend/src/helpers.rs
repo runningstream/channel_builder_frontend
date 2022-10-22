@@ -10,9 +10,6 @@ use serde_json::Value;
 use thiserror::Error;
 
 
-/// The name of the session cookie in the frontend
-pub static SESSION_COOKIE_NAME: &str = "session";
-
 pub static VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// An enum that differentiates frontend session types
@@ -25,6 +22,15 @@ impl SessType {
             SessType::Frontend => chrono::Duration::days(5),
             SessType::Roku => chrono::Duration::days(365),
             SessType::Display => chrono::Duration::days(365),
+        }
+    }
+
+    // The name of the session cookie for the interface
+    pub fn get_session_cookie_name(&self) -> &'static str {
+        match *self {
+            SessType::Frontend => "session", //TODO: change to "session_fe"
+            SessType::Roku => "session",     //TODO: change to "session_ro"
+            SessType::Display => "session_di",
         }
     }
 }

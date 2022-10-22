@@ -3,7 +3,7 @@
 use crate::{api_handlers, helpers, models, LOG_KEY};
 pub use api_handlers::{APIParams, orderly_shutdown};
 use chrono::prelude::{DateTime, Utc};
-use helpers::{SessType, SESSION_COOKIE_NAME};
+use helpers::{SessType};
 use warp::{Filter, Reply, Rejection};
 
 #[doc(hidden)]
@@ -627,7 +627,7 @@ fn get_form<T>()
 fn validate_session(sess_type: SessType, params: APIParams)
     -> impl Filter<Extract = ((String, i32),), Error = Rejection> + Clone
 {
-    warp::filters::cookie::cookie::<String>(SESSION_COOKIE_NAME)
+    warp::filters::cookie::cookie::<String>(sess_type.get_session_cookie_name())
         .and(add_in(params))
         .and(add_in(sess_type))
         .and_then(

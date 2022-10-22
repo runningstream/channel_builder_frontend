@@ -275,7 +275,7 @@ pub async fn authenticate(sess_type: SessType, params: APIParams,
         base_reply,
         "Set-Cookie",
         format!("{}={}; Max-Age={}; SameSite=Lax",
-            helpers::SESSION_COOKIE_NAME, sess_key,
+            sess_type.get_session_cookie_name(), sess_key,
             sess_type.get_max_age().num_seconds())
     ))
 }
@@ -618,7 +618,7 @@ pub async fn refresh_session(sess_type: SessType, params: APIParams,
         warp::reply::html("".to_string()),
         "Set-Cookie",
         format!("{}={}; Max-Age={}; SameSite=Lax",
-            helpers::SESSION_COOKIE_NAME, new_sess_key,
+            sess_type.get_session_cookie_name(), new_sess_key,
             sess_type.get_max_age().num_seconds())
     ))
 }
