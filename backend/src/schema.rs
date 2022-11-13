@@ -52,6 +52,7 @@ table! {
 joinable!(front_end_sess_keys -> user_data (userid));
 joinable!(roku_sess_keys -> user_data (userid));
 joinable!(display_sess_keys -> user_data (userid));
+joinable!(user_data -> channel_list (active_channel));
 
 allow_tables_to_appear_in_same_query!(
     channel_list,

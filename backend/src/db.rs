@@ -69,6 +69,7 @@ pub struct StatusReport {
     set_channel_list: u32,
     create_channel_list: u32,
     get_active_channel: u32,
+    get_active_channel_name: u32,
     set_active_channel: u32,
     get_status_report: u32,
     
@@ -99,6 +100,7 @@ impl fmt::Display for StatusReport {
                 "    Set: {}\n",
                 "    Create: {}\n",
                 "    Get Active: {}\n",
+                "    Get Active Name: {}\n",
                 "    Set Active: {}\n",
                 "  Status Reports: {}",
             ),
@@ -109,8 +111,8 @@ impl fmt::Display for StatusReport {
             self.logout_session_key, self.get_user_passhash,
             self.get_channel_lists, self.get_channel_list,
             self.set_channel_list, self.create_channel_list,
-            self.get_active_channel, self.set_active_channel,
-            self.get_status_report,
+            self.get_active_channel, self.get_active_channel_name,
+            self.set_active_channel, self.get_status_report,
         )
     }
 }
@@ -134,6 +136,7 @@ pub enum Action {
     SetChannelList { user_id: i32, list_name: String, list_data: String },
     CreateChannelList { user_id: i32, list_name: String },
     GetActiveChannel { user_id: i32 },
+    GetActiveChannelName { user_id: i32 },
     SetActiveChannel { user_id: i32, list_name: String },
     GetStatusReport,
     Shutdown,
@@ -250,6 +253,8 @@ impl Db {
                     Self::create_channel_list(&dat, &mut s_r, user_id, list_name),
                 Action::GetActiveChannel { user_id } =>
                     Self::get_active_channel(&dat, &mut s_r, user_id),
+                Action::GetActiveChannelName { user_id } =>
+                    Self::get_active_channel_name(&dat, &mut s_r, user_id),
                 Action::SetActiveChannel { user_id, list_name } =>
                     Self::set_active_channel(&dat, &mut s_r, user_id, list_name),
                 Action::GetStatusReport =>
@@ -617,13 +622,28 @@ impl Db {
     {
         s_r.get_active_channel += 1;
 
-        joinable!(user_data -> channel_list (active_channel));
-
         let results = allow_only_one(
             channel_list::table
                 .filter(channel_list::userid.eq(user_id))
                 .inner_join(user_data::table)
                 .select(channel_list::data)
+                .limit(5)
+                .load::<String>(&dat.db_conn)
+        )?;
+
+        Ok(Response::StringResp(results[0].clone()))
+    }
+
+    fn get_active_channel_name(dat: &InThreadData, s_r: &mut StatusReport, user_id: i32)
+        -> Result<Response, DBError>
+    {
+        s_r.get_active_channel_name += 1;
+
+        let results = allow_only_one(
+            channel_list::table
+                .filter(channel_list::userid.eq(user_id))
+                .inner_join(user_data::table)
+                .select(channel_list::name)
                 .limit(5)
                 .load::<String>(&dat.db_conn)
         )?;

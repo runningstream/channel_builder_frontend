@@ -116,6 +116,7 @@ pub struct InnerStatusReport {
     set_channel_list: u32,
     create_channel_list: u32,
     set_active_channel: u32,
+    get_active_channel_name: u32,
     get_active_channel: u32,
     get_active_channel_fe: u32,
     get_active_channel_ro: u32,
@@ -157,6 +158,7 @@ impl fmt::Display for InnerStatusReport {
                 "    Get Content: {}\n",
                 "    Get XML Content Roku: {}\n",
                 "    Get Channel Lists: {}\n",
+                "    Get Active Name: {}\n",
                 "    Get Active: {}\n",
                 "      Frontend: {}\n",
                 "      Roku: {}\n",
@@ -177,6 +179,7 @@ impl fmt::Display for InnerStatusReport {
             self.create_channel_list, self.set_active_channel,
             self.set_channel_list, self.get_channel_list,
             self.get_channel_xml_ro, self.get_channel_lists,
+            self.get_active_channel_name,
             self.get_active_channel, self.get_active_channel_fe,
             self.get_active_channel_ro, self.get_active_channel_di,
             self.get_status_report
@@ -561,6 +564,26 @@ pub async fn get_channel_xml(sess_type: SessType, params: APIParams,
 
     let xml_str1 = helpers::build_xml(json.clone());
     Ok(warp::reply::html(xml_str1))
+}
+
+pub async fn get_active_channel_name(sess_type: SessType, params: APIParams,
+        sess_info: (String, i32))
+    -> Result<impl Reply, Rejection>
+{
+    trace!("Beginning get_active_channel_name {:?}", sess_type);
+    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        report.get_active_channel_name += 1;
+    }).await;
+
+    let (_sess_key, user_id) = sess_info;
+
+    match params.db.please(Action::GetActiveChannelName {
+        user_id: user_id,
+    }).await {
+        Ok(Response::StringResp(val)) => Ok(warp::reply::html(val)),
+        Ok(resp) => Err(Rejections::db_api_err("GetActiveChannelName", resp).into()),
+        Err(err) => Err(Rejections::from(err).into()),
+    }
 }
 
 pub async fn refresh_session(sess_type: SessType, params: APIParams,

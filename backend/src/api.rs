@@ -109,6 +109,7 @@ pub fn build_filters(params: APIParams, cors_origins: Vec<String>, startup_time:
                     .or(api_set_channel_list_fe(params.clone()))
                     .or(api_create_channel_list_fe(params.clone()))
                     .or(api_set_active_channel_fe(params.clone()))
+                    .or(api_get_active_channel_name_fe(params.clone()))
                     .or(api_refresh_session_di(params.clone()))
             )
         )
@@ -553,7 +554,7 @@ APIDocs!{
 }
 
 APIDocs!{
-    Desc: "Return the active channel",
+    Desc: "Return the content in the active channel",
     URL: APIPathV1!("get_active_channel_fe"),
     Sess: APISessType!(FRONTEND),
     Method: APIMethod!(GET),
@@ -573,7 +574,7 @@ APIDocs!{
 }
 
 APIDocs!{
-    Desc: "Return the active channel",
+    Desc: "Return the content in the active channel",
     URL: APIPathV1!("get_active_channel_di"),
     Sess: APISessType!(DISPLAY),
     Method: APIMethod!(GET),
@@ -593,7 +594,7 @@ APIDocs!{
 }
 
 APIDocs!{
-    Desc: "Return the active channel",
+    Desc: "Return the content in the active channel",
     URL: APIPathV1!("get_active_channel_ro"),
     Sess: APISessType!(ROKU),
     Method: APIMethod!(GET),
@@ -609,6 +610,26 @@ APIDocs!{
             .and(add_in(params.clone()))
             .and(validate_session(SessType::Roku, params))
             .and_then(api_handlers::get_active_channel)
+    }
+}
+
+APIDocs!{
+    Desc: "Return the name of the active channel",
+    URL: APIPathV1!("get_active_channel_name_fe"),
+    Sess: APISessType!(FRONTEND),
+    Method: APIMethod!(GET),
+    CORS: APICORS!(true),
+    Data: APIDATA!(),
+
+    fn api_get_active_channel_name_fe(params: APIParams)
+        -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
+    {
+        api_v1_path("get_active_channel_name_fe")
+            .and(warp::get())
+            .and(add_in(SessType::Frontend))
+            .and(add_in(params.clone()))
+            .and(validate_session(SessType::Frontend, params))
+            .and_then(api_handlers::get_active_channel_name)
     }
 }
 
