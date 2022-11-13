@@ -598,7 +598,8 @@ impl Db {
         let new_channel = db_models::InsertChannelList {
             userid: user_id,
             name: &list_name,
-            data: "{\"entries\": []}",
+            //data: "{\"entries\": []}",
+            data: include_str!("new_channel.json"),
         };
 
         // Insert it
