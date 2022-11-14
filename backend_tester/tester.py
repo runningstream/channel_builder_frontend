@@ -118,6 +118,18 @@ class ChannelBuilderTester:
         print(req.text)
         return req.status_code == 200
 
+    def get_active_channel_name_fe(self):
+        sess_key = self.get_sess_key_di()
+        headers = {
+            "Cookie": sess_key,
+            "referer": self.get_referer(),
+        }
+        req = requests.get(self.get_url("get_active_channel_name_fe"),
+            headers = headers,
+        )
+        print(req.text)
+        return req.status_code == 200
+
     def refresh_session_ro(self):
         portion = "ro"
         username = self.username
@@ -176,6 +188,15 @@ class ChannelBuilderTester:
         print(req.text)
         return req.status_code == 200
 
+    def delete_channel_fe(self, name):
+        sess_key = self.get_sess_key_fe()
+        headers = { "referer": self.get_referer(), "Cookie": sess_key, }
+        req = requests.delete(self.get_url(f"delete_channel_fe?listname={name}"),
+            headers = headers,
+        )
+        print(req.text)
+        return req.status_code == 200
+
     def set_active_channel_fe(self, name):
         sess_key = self.get_sess_key_fe()
         data = {
@@ -212,8 +233,11 @@ if __name__ == "__main__":
         ("Get Active Channel Display", tester.get_active_channel_di),
         ("Get Channel XML Roku", tester.get_channel_xml_ro),
         ("Create New Channel List", tester.create_channel_list_fe, "Custom List"),
+        ("Create New Channel List", tester.create_channel_list_fe, "Will Be Deleted"),
         ("Set New Channel List", tester.set_channel_list_fe, "Custom List", cust_chan_content),
         ("Set Active Channel", tester.set_active_channel_fe, "Custom List"),
+        ("Get Active Channel Name", tester.get_active_channel_name_fe),
+        ("Delete Channel", tester.delete_channel_fe, "Will Be Deleted"),
         ("Get Channel XML Roku", tester.get_channel_xml_ro),
         ("Get Status Report", tester.get_status_report),
     ]

@@ -70,6 +70,7 @@ pub struct StatusReport {
     create_channel_list: u32,
     get_active_channel: u32,
     get_active_channel_name: u32,
+    delete_channel: u32,
     set_active_channel: u32,
     get_status_report: u32,
     
@@ -99,6 +100,7 @@ impl fmt::Display for StatusReport {
                 "    Get: {}\n",
                 "    Set: {}\n",
                 "    Create: {}\n",
+                "    Delete: {}\n",
                 "    Get Active: {}\n",
                 "    Get Active Name: {}\n",
                 "    Set Active: {}\n",
@@ -111,6 +113,7 @@ impl fmt::Display for StatusReport {
             self.logout_session_key, self.get_user_passhash,
             self.get_channel_lists, self.get_channel_list,
             self.set_channel_list, self.create_channel_list,
+            self.delete_channel,
             self.get_active_channel, self.get_active_channel_name,
             self.set_active_channel, self.get_status_report,
         )
@@ -138,6 +141,7 @@ pub enum Action {
     GetActiveChannel { user_id: i32 },
     GetActiveChannelName { user_id: i32 },
     SetActiveChannel { user_id: i32, list_name: String },
+    DeleteChannel { user_id: i32, list_name: String },
     GetStatusReport,
     Shutdown,
 }
@@ -257,6 +261,8 @@ impl Db {
                     Self::get_active_channel_name(&dat, &mut s_r, user_id),
                 Action::SetActiveChannel { user_id, list_name } =>
                     Self::set_active_channel(&dat, &mut s_r, user_id, list_name),
+                Action::DeleteChannel { user_id, list_name } =>
+                    Self::delete_channel(&dat, &mut s_r, user_id, list_name),
                 Action::GetStatusReport =>
                     Self::get_status_report(&mut s_r),
                 Action::Shutdown =>
@@ -671,6 +677,31 @@ impl Db {
         allow_only_one(
             diesel::update(ud_dsl.find(user_id))
                 .set(user_data::active_channel.eq(results[0].id))
+                .execute(&dat.db_conn)
+        )?;
+
+        Ok(Response::Empty)
+    }
+
+    fn delete_channel(dat: &InThreadData, s_r: &mut StatusReport,
+            user_id: i32, list_name: String
+        )
+        -> Result<Response, DBError>
+    {
+        s_r.delete_channel += 1;
+
+        // Get the channel
+        let results = allow_only_one(
+            cl_dsl
+                .filter(channel_list::userid.eq(user_id))
+                .filter(channel_list::name.eq(&list_name))
+                .limit(5)
+                .load::<db_models::QueryChannelList>(&dat.db_conn)
+        )?;
+
+        // Delete the channel
+        allow_only_one(
+            diesel::delete(cl_dsl.find(results[0].id))
                 .execute(&dat.db_conn)
         )?;
 

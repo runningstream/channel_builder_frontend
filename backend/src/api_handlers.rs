@@ -2,7 +2,7 @@ use std::{error, fmt};
 use std::sync::{Arc};
 use crate::{db, email, helpers, models, password_hash_version};
 use chrono::prelude::{DateTime, Utc};
-use helpers::SessType;
+use helpers::{SessType, MIN_PASSWORD_LEN};
 use db::{Action, Response, DBError};
 use password_hash_version::PWHashError;
 use rand::Rng;
@@ -115,6 +115,7 @@ pub struct InnerStatusReport {
     get_channel_xml_ro: u32,
     set_channel_list: u32,
     create_channel_list: u32,
+    delete_channel: u32,
     set_active_channel: u32,
     get_active_channel_name: u32,
     get_active_channel: u32,
@@ -154,6 +155,7 @@ impl fmt::Display for InnerStatusReport {
                 "  Channel Stuff:\n",
                 "    Create: {}\n",
                 "    Set Active: {}\n",
+                "    Delete: {}\n",
                 "    Change Content: {}\n",
                 "    Get Content: {}\n",
                 "    Get XML Content Roku: {}\n",
@@ -177,6 +179,7 @@ impl fmt::Display for InnerStatusReport {
             self.logout_session_fe, self.logout_session_ro,
             self.logout_session_di,
             self.create_channel_list, self.set_active_channel,
+            self.delete_channel,
             self.set_channel_list, self.get_channel_list,
             self.get_channel_xml_ro, self.get_channel_lists,
             self.get_active_channel_name,
@@ -330,6 +333,11 @@ pub async fn create_account(params: APIParams,
     // Fail early if the username is invalid
     email::parse_addr(&form_dat.username)
         .map_err(|_| {Rejections::InvalidEmailAddr})?;
+
+    // Fail early if the password isn't long enough
+    if form_dat.password.len() < MIN_PASSWORD_LEN {
+        return Err(Rejections::InvalidPassword.into());
+    };
 
     // TODO: handle properly when the rand number is already in the DB
     let reg_key = gen_large_rand_str();
@@ -709,6 +717,27 @@ pub async fn set_active_channel(params: APIParams, sess_info: (String, i32),
     }).await {
         Ok(Response::Empty) => Ok(StatusCode::OK),
         Ok(resp) => Err(Rejections::db_api_err("SetActiveChannel", resp).into()),
+        Err(err) => Err(Rejections::from(err).into()),
+    }
+}
+
+pub async fn delete_channel(params: APIParams, sess_info: (String, i32), 
+    form_dat: models::DeleteChannelQuery)
+    -> Result<impl Reply, Rejection>
+{
+    trace!("Beginning delete_channel");
+    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        report.delete_channel += 1;
+    }).await;
+
+    let (_sess_key, user_id) = sess_info;
+
+    match params.db.please(Action::DeleteChannel {
+        user_id: user_id,
+        list_name: form_dat.listname,
+    }).await {
+        Ok(Response::Empty) => Ok(StatusCode::OK),
+        Ok(resp) => Err(Rejections::db_api_err("DeleteChannel", resp).into()),
         Err(err) => Err(Rejections::from(err).into()),
     }
 }

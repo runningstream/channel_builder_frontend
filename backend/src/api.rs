@@ -33,6 +33,8 @@ macro_rules! APIPathV1 {
 macro_rules! APIMethod {
     (POST) => { "POST" };
     (GET) => { "GET" };
+    (DELETE) => { "DELETE" };
+    (PUT) => { "PUT" };
 }
 
 #[doc(hidden)]
@@ -78,7 +80,7 @@ pub fn build_filters(params: APIParams, cors_origins: Vec<String>, startup_time:
     // Setup warp's built in CORS
     let cors = warp::cors()
         .allow_origins(cors_origins.iter().map(|s| s.as_ref()))
-        .allow_methods(vec!["GET", "POST"])
+        .allow_methods(vec!["GET", "POST", "DELETE"])
         //.allow_headers(vec!["content-type"]) // Generally not required
         .allow_credentials(true);
 
@@ -109,6 +111,7 @@ pub fn build_filters(params: APIParams, cors_origins: Vec<String>, startup_time:
                     .or(api_set_channel_list_fe(params.clone()))
                     .or(api_create_channel_list_fe(params.clone()))
                     .or(api_set_active_channel_fe(params.clone()))
+                    .or(api_delete_channel_fe(params.clone()))
                     .or(api_get_active_channel_name_fe(params.clone()))
                     .or(api_refresh_session_di(params.clone()))
             )
@@ -550,6 +553,26 @@ APIDocs!{
             .and(validate_session(SessType::Frontend, params))
             .and(get_form::<models::SetActiveChannelForm>())
             .and_then(api_handlers::set_active_channel)
+    }
+}
+
+APIDocs!{
+    Desc: "Delete a channel",
+    URL: APIPathV1!("delete_channel_fe"),
+    Sess: APISessType!(FRONTEND),
+    Method: APIMethod!(DELETE),
+    CORS: APICORS!(true),
+    Data: APIDATA!("listname string"),
+
+    fn api_delete_channel_fe(params: APIParams)
+        -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
+    {
+        api_v1_path("delete_channel_fe")
+            .and(warp::delete())
+            .and(add_in(params.clone()))
+            .and(validate_session(SessType::Frontend, params))
+            .and(warp::query::<models::DeleteChannelQuery>())
+            .and_then(api_handlers::delete_channel)
     }
 }
 

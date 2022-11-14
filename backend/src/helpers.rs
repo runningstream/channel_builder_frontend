@@ -10,6 +10,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 
+pub static MIN_PASSWORD_LEN: usize = 6;
 pub static VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// An enum that differentiates frontend session types

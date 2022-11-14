@@ -29,6 +29,11 @@ pub struct SetActiveChannelForm {
 }
 
 #[derive(Debug,Deserialize,Serialize,Clone)]
+pub struct DeleteChannelQuery {
+    pub listname: String,
+}
+
+#[derive(Debug,Deserialize,Serialize,Clone)]
 pub struct GetChannelListQuery {
     pub list_name: String,
 }
