@@ -216,7 +216,7 @@ if __name__ == "__main__":
     api_port = "3031"
     frontend_port = "5173"
     username = "runningstreamllc+test10@gmail.com"
-    password = "12345"
+    password = "123456"
 
     cust_chan_content = open("test_channel_nice.txt", "r").read()
 
