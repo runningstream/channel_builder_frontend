@@ -671,7 +671,10 @@ fn get_form<T>()
 fn validate_session(sess_type: SessType, params: APIParams)
     -> impl Filter<Extract = ((String, i32),), Error = Rejection> + Clone
 {
+    // TODO: remove OLD one in next version!
     warp::filters::cookie::cookie::<String>(sess_type.get_session_cookie_name())
+        .or(warp::filters::cookie::cookie::<String>(sess_type.get_OLD_session_cookie_name()))
+        .unify()
         .and(add_in(params))
         .and(add_in(sess_type))
         .and_then(

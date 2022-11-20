@@ -29,8 +29,18 @@ impl SessType {
     // The name of the session cookie for the interface
     pub fn get_session_cookie_name(&self) -> &'static str {
         match *self {
-            SessType::Frontend => "session", //TODO: change to "session_fe"
-            SessType::Roku => "session",     //TODO: change to "session_ro"
+            SessType::Frontend => "session_fe",
+            SessType::Roku => "session_ro",
+            SessType::Display => "session_di",
+        }
+    }
+
+    // The name of the alt session cookie for the interface
+    // TODO Remove this in next version
+    pub fn get_OLD_session_cookie_name(&self) -> &'static str {
+        match *self {
+            SessType::Frontend => "session",
+            SessType::Roku => "session",
             SessType::Display => "session_di",
         }
     }
