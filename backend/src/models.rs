@@ -19,6 +19,12 @@ pub struct SetChannelListForm {
 }
 
 #[derive(Debug,Deserialize,Serialize,Clone)]
+pub struct RenameChannelForm {
+    pub listname: String,
+    pub newlistname: String,
+}
+
+#[derive(Debug,Deserialize,Serialize,Clone)]
 pub struct CreateChannelListForm {
     pub listname: String,
 }

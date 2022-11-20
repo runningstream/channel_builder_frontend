@@ -109,6 +109,7 @@ pub fn build_filters(params: APIParams, cors_origins: Vec<String>, startup_time:
                     .or(api_get_channel_list_di(params.clone()))
                     .or(api_get_channel_lists_fe(params.clone()))
                     .or(api_set_channel_list_fe(params.clone()))
+                    .or(api_rename_channel_fe(params.clone()))
                     .or(api_create_channel_list_fe(params.clone()))
                     .or(api_set_active_channel_fe(params.clone()))
                     .or(api_delete_channel_fe(params.clone()))
@@ -509,6 +510,26 @@ APIDocs!{
             .and(validate_session(SessType::Frontend, params))
             .and(get_form::<models::SetChannelListForm>())
             .and_then(api_handlers::set_channel_list)
+    }
+}
+
+APIDocs!{
+    Desc: "Rename a channel list",
+    URL: APIPathV1!("rename_channel_fe"),
+    Sess: APISessType!(FRONTEND),
+    Method: APIMethod!(POST),
+    CORS: APICORS!(true),
+    Data: APIDATA!("listname and newlistname strings"),
+
+    fn api_rename_channel_fe(params: APIParams)
+        -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
+    {
+        api_v1_path("rename_channel_fe")
+            .and(warp::post())
+            .and(add_in(params.clone()))
+            .and(validate_session(SessType::Frontend, params))
+            .and(get_form::<models::RenameChannelForm>())
+            .and_then(api_handlers::rename_channel)
     }
 }
 

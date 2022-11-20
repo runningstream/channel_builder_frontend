@@ -114,6 +114,7 @@ pub struct InnerStatusReport {
     get_channel_list: u32,
     get_channel_xml_ro: u32,
     set_channel_list: u32,
+    rename_channel: u32,
     create_channel_list: u32,
     delete_channel: u32,
     set_active_channel: u32,
@@ -154,6 +155,7 @@ impl fmt::Display for InnerStatusReport {
                 "    Display: {}\n",
                 "  Channel Stuff:\n",
                 "    Create: {}\n",
+                "    Rename: {}\n",
                 "    Set Active: {}\n",
                 "    Delete: {}\n",
                 "    Change Content: {}\n",
@@ -178,8 +180,8 @@ impl fmt::Display for InnerStatusReport {
             self.validate_session_di, self.logout_session,
             self.logout_session_fe, self.logout_session_ro,
             self.logout_session_di,
-            self.create_channel_list, self.set_active_channel,
-            self.delete_channel,
+            self.create_channel_list, self.rename_channel,
+            self.set_active_channel, self.delete_channel,
             self.set_channel_list, self.get_channel_list,
             self.get_channel_xml_ro, self.get_channel_lists,
             self.get_active_channel_name,
@@ -232,6 +234,7 @@ pub async fn authenticate(sess_type: SessType, params: APIParams,
             Ok(Response::UserPassHash(pass_hash, hash_ver, valid_status)) => 
                 Ok((pass_hash, hash_ver, valid_status)),
             Ok(resp) => Err(Rejections::db_api_err("GetUserPassHash", resp)),
+            Err(DBError::InvalidRowCount(0)) => Err(Rejections::InvalidUserNonValidated.into()),
             Err(err) => Err(Rejections::from(err)),
         }?;
 
@@ -679,6 +682,28 @@ pub async fn set_channel_list(params: APIParams, sess_info: (String, i32),
     }
 }
 
+pub async fn rename_channel(params: APIParams, sess_info: (String, i32),
+    form_dat: models::RenameChannelForm)
+    -> Result<impl Reply, Rejection>
+{
+    trace!("Beginning rename_channel");
+    params.a_s_r.mod_report(|report: &mut InnerStatusReport| {
+        report.rename_channel += 1;
+    }).await;
+
+    let (_sess_key, user_id) = sess_info;
+
+    match params.db.please(Action::RenameChannel {
+        user_id: user_id,
+        list_name: form_dat.listname,
+        new_list_name: form_dat.newlistname,
+    }).await {
+        Ok(Response::Empty) => Ok(StatusCode::OK),
+        Ok(resp) => Err(Rejections::db_api_err("RenameChannel", resp).into()),
+        Err(err) => Err(Rejections::from(err).into()),
+    }
+}
+
 pub async fn create_channel_list(params: APIParams, sess_info: (String, i32), 
     form_dat: models::CreateChannelListForm)
     -> Result<impl Reply, Rejection>
@@ -770,8 +795,8 @@ pub async fn handle_rejection(err: Rejection)
     } else {
         match err.find() {
             Some(Rejections::InvalidUserLookup) |
-            Some(Rejections::InvalidUserNonValidated) |
             Some(Rejections::InvalidPassword) |
+            Some(Rejections::InvalidUserNonValidated) |
             Some(Rejections::InvalidSession) |
             Some(Rejections::InvalidEmailAddr) |
             Some(Rejections::InvalidValidationCode)
