@@ -37,7 +37,7 @@ services:
             POSTGRES_PASSWORD_FILE: /run/secrets/db_password
             POSTGRES_HOST: "db:5432"
             CB_LISTEN: "0.0.0.0:3031"
-            FRONTEND_LOC: "http://192.168.86.11:8080"
+            FRONTEND_LOC: "http://192.168.86.11:5174"
             HTML_PLAYER_LOC: "http://192.168.86.11:5173"
             SMTP_SERVER_FILE: /run/secrets/smtp_server
             SMTP_PORT_FILE: /run/secrets/smtp_port
