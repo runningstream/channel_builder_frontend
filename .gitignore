@@ -1,9 +1,6 @@
-backend/target
 *.swp
 *.css.map
 *.secret
-backend/Cargo.lock
-dev_diesel_env
-frontend/node_modules/
-frontend/package-lock.json
-frontend/package.json
+dist/*
+node_modules/*
+package-lock.json
