@@ -1,10 +1,10 @@
 <script setup lang="ts">
     import { ref } from "vue";
     import VideoList from "./VideoList.vue";
-    import MediaEdit from "./MediaEdit.vue";
-    import SublistEdit from "./SublistEdit.vue";
-    import Confirm from "./Confirm.vue";
-    import RenameChannel from "./RenameChannel.vue";
+    import MediaEdit from "./VideoListEntry/MediaEdit.vue";
+    import SublistEdit from "./VideoListEntry/SublistEdit.vue";
+    import Confirm from "./VideoListEntry/Confirm.vue";
+    import RenameChannel from "./VideoListEntry/RenameChannel.vue";
 
     import type { Ref } from "vue";
     import type { VideoType } from "../api_js/serverAPI";
@@ -20,6 +20,7 @@
             type: Number,
             default: 0,
         },
+        editEnable: Boolean,
     });
 
     const emit = defineEmits<{
@@ -68,7 +69,7 @@
             <div>{{ entry.name }}</div>
             <div class="entryinfoarea">
                 <img :src="entry.image" v-if="entry.image">
-                <div class="buttonarea">
+                <div class="buttonarea" v-if="editEnable">
                     <input type="button" value="Modify" @click="show_edit_media=true">
                     <input type="button" value="Delete" @click="show_delete_entry=true">
                     <input type="button" value="Move Up"
@@ -83,7 +84,7 @@
                 <span>{{ entry.name }}</span>
                 <div class="entryinfoarea">
                     <img :src="entry.image" v-if="entry.image">
-                    <div class="buttonarea">
+                    <div class="buttonarea" v-if="editEnable">
                         <input type="button" value="Modify" @click="show_edit_sublist=true">
                         <input type="button" value="Delete" @click="show_delete_entry=true">
                         <input type="button" value="Add Sublist" @click="show_add_sublist=true">
@@ -97,6 +98,7 @@
             </summary>
             <VideoList
                 :channelList="entry.entries" :depth="depth"
+                :editEnable="editEnable"
                 @videoSelected="$emit('videoSelected', $event)"
                 @updateEntries="update_entries($event)"
             />
@@ -105,7 +107,7 @@
             <div>
                 <span>{{ entry.name }}</span>
                 <div class="entryinfoarea">
-                    <div class="buttonarea">
+                    <div class="buttonarea" v-if="editEnable">
                         <input type="button" value="Add Sublist" @click="show_add_sublist=true">
                         <input type="button" value="Add Media" @click="show_add_media=true">
                         <input type="button" value="Rename" @click="show_rename_channel=true">
@@ -116,36 +118,44 @@
             </div>
             <VideoList
                 :channelList="entry.entries"
+                :editEnable="editEnable"
                 @videoSelected="$emit('videoSelected', $event)"
                 @updateEntries="update_entries($event)"
             />
         </div>
-        <MediaEdit :inputEntry="entry" :display="show_edit_media"
+        <MediaEdit v-if="editEnable"
+            :inputEntry="entry" :display="show_edit_media"
             @cancelModal="show_edit_media=false"
             @saveModal="show_edit_media=false; $emit('updateEntry', $event);"
         />
-        <MediaEdit :display="show_add_media"
+        <MediaEdit v-if="editEnable"
+            :display="show_add_media"
             @cancelModal="show_add_media=false"
             @saveModal="show_add_media=false; add_entry($event);"
         />
-        <SublistEdit :inputEntry="entry" :display="show_edit_sublist"
+        <SublistEdit v-if="editEnable"
+            :inputEntry="entry" :display="show_edit_sublist"
             @cancelModal="show_edit_sublist=false"
             @saveModal="show_edit_sublist=false; $emit('updateEntry', $event);"
         />
-        <SublistEdit :display="show_add_sublist"
+        <SublistEdit v-if="editEnable"
+            :display="show_add_sublist"
             @cancelModal="show_add_sublist=false"
             @saveModal="show_add_sublist=false; add_entry($event);"
         />
-        <RenameChannel :display="show_rename_channel" :currentName="entry.name"
+        <RenameChannel v-if="editEnable"
+            :display="show_rename_channel" :currentName="entry.name"
             @cancelModal="show_rename_channel=false"
             @saveModal="show_rename_channel=false; $emit('renameChannel', entry.name, $event);"
         />
-        <Confirm :display="show_delete_channel"
+        <Confirm v-if="editEnable"
+            :display="show_delete_channel"
             :text="`Are you sure you want to delete channel: ${ entry.name }`"
             @cancelModal="show_delete_channel=false"
             @okModal="show_delete_channel=false; $emit('deleteChannel', entry.name);"
         />
-        <Confirm :display="show_delete_entry"
+        <Confirm v-if="editEnable"
+            :display="show_delete_entry"
             :text="`Are you sure you want to delete entry: ${ entry.name }`"
             @cancelModal="show_delete_entry=false"
             @okModal="show_delete_entry=false; $emit('deleteEntry', entry);"

@@ -1,33 +1,50 @@
 <script setup lang="ts">
-    import { onMounted } from "vue";
+    import { ref, onMounted } from "vue";
 
     import { apiInitialize, apiValidateSession } from "../api_js/serverAPI";
     import { jump_to_login, jump_to_after_login } from "./Helpers";
 
     import Logout from "./Logout.vue";
     import HelpLink from "./HelpLink.vue";
+    import Spinner from "./Spinner.vue";
 
     const app_version = __APP_VERSION__;
+    
+    const show_spinner = ref(true);
 
     const props = defineProps({
         // Set this true if the page should only be accessible when logged in
         // Don't set this if the page should only be accessible when NOT logged in
         loggedIn: Boolean,
+        showTitle: Boolean,
     });
 
     apiInitialize();
 
     onMounted( () => {
+        show_spinner.value = true;
         if( props.loggedIn ) {
             // Page requires user to be logged in
             apiValidateSession()
-                .then( () => { /* Validation succeeded, so allow page */ } )
-                .catch( (_error: any) => { /* User not logged in... */ jump_to_login(); } );
+                .then( () => { 
+                    /* Validation succeeded, so allow page */
+                    show_spinner.value = false;
+                } )
+                .catch( (_error: any) => {
+                    /* User not logged in... */
+                    jump_to_login();
+                } );
         } else {
             // Page requires user to not be logged in
             apiValidateSession()
-                .then( () => { /* User is logged in... */ jump_to_after_login(); } )
-                .catch( (_error: any) => { /* Validation failed, so allow page */ } );
+                .then( () => {
+                    /* User is logged in... */
+                    jump_to_after_login();
+                } )
+                .catch( (_error: any) => {
+                    /* Validation failed, so allow page */
+                    show_spinner.value = false;
+                } );
         }
     });
 </script>
@@ -35,15 +52,16 @@
 <template>
     <div :app-ver="app_version">
         <div id="header_area">
-            <div id="hdr_name" v-if="loggedIn">Running Stream</div>
-            <div id="mgmt_btns" v-if="loggedIn">
-                <HelpLink />
-                <Logout />
+            <div id="hdr_name" v-if="showTitle">Running Stream</div>
+            <div id="mgmt_btns">
+                <HelpLink v-if="showTitle"/>
+                <Logout v-if="loggedIn"/>
             </div>
         </div>
         <div id="screen_area">
             <slot />
         </div>
+        <Spinner :display="show_spinner" />
     </div>
 </template>
 

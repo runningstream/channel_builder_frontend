@@ -1,7 +1,7 @@
 /*
-    Provides a way for the user to add or edit media
+    Provides a way for the user to add or edit a sublist
     Properties:
-        inputEntry - set this to a VideoType object when the user should modify an existing video
+        inputEntry - set this to a VideoType object when the user should modify an existing entry
         display - set this when the dialog should be displayed
     Emits:
         cancelModal - when this event is emitted, the parent should unset/falisfy the display property and ignore any data entered
@@ -9,11 +9,11 @@
 */
 <script setup lang="ts">
     import { ref, watch } from "vue";
-    import Modal from "./Modal.vue";
-    import { newVideoTypeMedia } from "../api_js/serverAPI";
+    import Modal from "../Modal.vue";
+    import { newVideoTypeSublist } from "../../api_js/serverAPI";
 
     import type { Ref } from "vue";
-    import type { VideoType } from "../api_js/serverAPI";
+    import type { VideoType } from "../../api_js/serverAPI";
 
     const props = defineProps({
         inputEntry: Object as () => VideoType | null,
@@ -39,21 +39,17 @@
     // Set a default temp entry or copy in the provided one
     // Additionally, URLs need to be decoded before shown to user
     function setup_entry() {
-        entry.value = newVideoTypeMedia();
+        entry.value = newVideoTypeSublist();
         if( props.inputEntry != undefined ) {
             entry.value.name = props.inputEntry.name;
-            entry.value.loop = props.inputEntry.loop;
-            entry.value.videotype = props.inputEntry.videotype;
             entry.value.image = decodeURI(props.inputEntry.image ? props.inputEntry.image : "");
-            entry.value.videourl = decodeURI(props.inputEntry.videourl ? props.inputEntry.videourl : "");
+            entry.value.entries = props.inputEntry.entries;
         }
     }
 
     function save_entry() {
-        let output = JSON.parse(JSON.stringify(entry.value));
-        output.image = encodeURI(output.image ? output.image : "");
-        output.videourl = encodeURI(output.videourl ? output.videourl : "");
-        emit('saveModal', output);
+        entry.value.image = encodeURI(entry.value.image ? entry.value.image : "");
+        emit('saveModal', entry.value);
     }
 </script>
 
@@ -62,18 +58,14 @@
             :display="display"
             @pressedEsc="$emit('cancelModal')"
         >
-            <form class="mediaedit_box" @submit.prevent="save_entry()">
+            <form class="sublistedit_box" @submit.prevent="save_entry()">
                 <div class="close_button" @click="$emit('cancelModal')">x</div>
                 <div class="inputs_area">
                     <label>Name: <input type="text" v-model="entry.name"></label>
                     <label>Image URL: <input type="text" v-model="entry.image"></label>
-                    <label>Media URL: <input type="text" v-model="entry.videourl"></label>
-                    <label>Loop: <input type="checkbox" v-model="entry.loop"></label>
-                    <label>MP4: <input type="radio" value="mp4" v-model="entry.videotype"></label>
-                    <label>Audio: <input type="radio" value="audio" v-model="entry.videotype"></label>
                 </div>
                 <div class="button_area">
-                    <input type="submit" class="bigger_text" :value="props.inputEntry == undefined ? 'Add Entry' : 'Modify Entry'">
+                    <input type="submit" class="bigger_text" :value="props.inputEntry == undefined ? 'Add Sublist' : 'Modify Sublist'">
                     <input type="button" class="bigger_text" @click="$emit('cancelModal')" value="Cancel">
                 </div>
             </form>
@@ -81,7 +73,7 @@
 </template>
 
 <style scoped>
-.mediaedit_box {
+.sublistedit_box {
     position: relative;
     width: fit-content;
     max-width: 90%;

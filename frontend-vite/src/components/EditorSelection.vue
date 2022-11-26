@@ -194,6 +194,7 @@
             />
         </div>
         <VideoListEntry id="video_list" :entry="channel_list_as_entry"
+            :editEnable="true"
             @videoSelected="select_video"
             @updateEntry="update_entry"
             @renameChannel="rename_channel"
@@ -219,6 +220,7 @@
     #video_list {
         width: 80%;
         text-align: center;
+        margin-bottom: 5px;
     }
 
     .buttonarea {
@@ -245,9 +247,5 @@
             margin-top: 10px;
             padding-top: 10px;
         }
-    }
-
-    #video_list {
-        margin-bottom: 5px;
     }
 </style>

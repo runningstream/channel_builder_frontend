@@ -9,6 +9,7 @@
             type: Number,
             default: 0,
         },
+        editEnable: Boolean,
     });
     const emit = defineEmits<{
         (e: "videoSelected", entry: VideoType) : void
@@ -100,6 +101,7 @@
         <VideoListEntry class="video_list_entry"
             v-if="channelList != undefined"
             v-for="(entry, index) in channelList" :entry="entry"
+            :editEnable="editEnable"
             :depth="(depth + 1) % 2"
             :firstEntry="index == 0 ? true : false"
             :lastEntry="index == channelList.length - 1 ? true : false"

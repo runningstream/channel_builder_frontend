@@ -9,7 +9,7 @@
 */
 <script setup lang="ts">
     import { ref, watch } from "vue";
-    import Modal from "./Modal.vue";
+    import Modal from "../Modal.vue";
 
     import type { Ref } from "vue";
 

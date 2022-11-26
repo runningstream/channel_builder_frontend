@@ -4,7 +4,7 @@
 </script>
 
 <template>
-    <PageBase>
+    <PageBase showTitle>
         <Validation />
     </PageBase>
 </template>

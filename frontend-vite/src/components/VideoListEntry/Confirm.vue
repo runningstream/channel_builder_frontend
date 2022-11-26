@@ -8,7 +8,7 @@
         cancelModal - when this event is emitted, the parent should unset/falisfy the display property, and the user has clicked "cancel"
 */
 <script setup lang="ts">
-    import Modal from "./Modal.vue";
+    import Modal from "../Modal.vue";
 
     const props = defineProps({
         text: String,
