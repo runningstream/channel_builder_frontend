@@ -1,9 +1,0 @@
-#!/bin/bash
-
-DATE=`date +%+Y%m%d-%H%M%S`
-export PGPASSFILE="pgpass-$DATE"
-echo 'localhost:5432:*:postgres:password' > $PGPASSFILE
-pg_dumpall -h localhost -U postgres >> psql-backup-$DATE
-
-# TO RESTORE
-# psql -f psql-backup-date postgres

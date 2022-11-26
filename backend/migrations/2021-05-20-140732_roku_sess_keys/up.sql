@@ -1,7 +1,0 @@
-CREATE TABLE roku_sess_keys (
-    id SERIAL PRIMARY KEY,
-    userid INTEGER REFERENCES user_data (id) ON DELETE CASCADE NOT NULL,
-    sesskey VARCHAR UNIQUE NOT NULL,
-    creationtime TIMESTAMP WITH TIME ZONE NOT NULL,
-    lastusedtime TIMESTAMP WITH TIME ZONE NOT NULL
-)
