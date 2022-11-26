@@ -14,5 +14,8 @@ export default defineConfig({
         validate: resolve(__dirname, "validate.html"),
       }
     }
+  },
+  define: {
+    __APP_VERSION__: JSON.stringify(require('./package.json').version),
   }
 })
